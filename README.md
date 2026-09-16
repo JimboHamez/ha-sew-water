@@ -35,19 +35,17 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.0.0b2
+## 🆕 What's new in v2.0.0b3
 
-**Second beta.** Three things you'll notice:
+**Third beta.** A fix for the sign-in screen, prompted by [issue #1](https://github.com/JimboHamez/ha-sew-water/issues/1):
 
-- **Setup works on accounts other than the author's.** Billing-account and meter discovery now mirrors the portal's own calls; the previous guess returned no billing account against the live portal, so setup could fail right after the code was accepted.
-- **Hourly statistics.** `sew_water:water_usage_mains` now gets 24 rows per day instead of one, so the Energy dashboard's hourly view shows real usage. Days imported by b1 keep their single 11:00 row until they are re-imported — automatically within the 30-day window, or via `sew_water.import_from_date`.
-- **The session no longer expires between polls.** The portal drops an idle session after about 24 hours, which is longer than the daily poll gap only on paper. The home page is now loaded every 30 minutes to keep it alive, and a session that has died anyway triggers re-authentication immediately rather than at the next poll.
+- **An unexplained login is no longer reported as a wrong password.** The portal normally answers a bad password with an explicit message, but it can also answer with nothing at all. That case now gets its own message asking for a debug log, the portal's full response is logged (session IDs masked), and a redirect delivered the other way the portal can send it is followed.
+- **Email address checked first.** A typo in the address is flagged on the field before the portal is contacted.
+- **Keep-alive documented against a real measurement.** The portal's idle timeout is between 2 and 4 hours (alive after 2 h idle, gone after 4); the 30-minute keep-alive stays.
 
-Also: **Reconfigure** flow, a repair issue for 1.x entries, translated icons and error messages, `data_description` help on every setup field, *Last reading date* moved to a disabled-by-default diagnostic entity, and a fix for the running total skipping the first day of a re-imported window. The integration now records **Platinum** on the [quality scale](#home-assistant-quality-scale), backed by an integration-level test suite at 99 % coverage.
+From b2: discovery that works on accounts other than the author's, hourly statistics, session keep-alive, Reconfigure flow, repair issue for 1.x entries, Platinum on the [quality scale](#home-assistant-quality-scale). From b1: pure-HTTP client (nothing to install), one-time code setup, standard re-authentication, 02:00 poll with a 30-day re-import window, throttling-aware retries.
 
-Still from b1: pure-HTTP client (nothing to install), one-time code setup, standard re-authentication, 02:00 poll with a 30-day re-import window, throttling-aware retries.
-
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0b2).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0b3).
 
 ---
 

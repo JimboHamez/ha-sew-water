@@ -3,7 +3,11 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.0.0b3] — 2026-09-16
+
+Third beta. Stops an unexplained portal login response from being reported as bad
+credentials (#1), checks the email address before contacting the portal, and records the
+measured session idle timeout.
 
 ### Fixed
 - Setup reported "The email address or password was not accepted" when the portal's login call
