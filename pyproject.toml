@@ -25,6 +25,8 @@ ignore_missing_imports = true
 follow_imports = "silent"
 
 [tool.pytest.ini_options]
+# CI disables the logging plugin; keep local runs identical so caplog-dependent tests cannot slip through.
+addopts = "-p no:logging"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 

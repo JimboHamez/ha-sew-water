@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 import json
-import logging
 import re
 from typing import Any
+from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs
 
 import aiohttp
@@ -14,6 +14,7 @@ from aioresponses import aioresponses
 import pytest
 from yarl import URL
 
+import sew_client
 from sew_client import (  # loaded from file by conftest.py, without importing the HA package
     BILLING_ACCOUNT_FIELDS,
     METER_FIELDS,
@@ -118,17 +119,20 @@ async def test_login_rejects_bad_credentials(client: SewClient, mocked: aiorespo
         await client.async_login("user@example.com", "wrong")
 
 
-async def test_login_with_empty_result_is_unexplained_not_auth(
-    client: SewClient, mocked: aioresponses, caplog: pytest.LogCaptureFixture
-) -> None:
+def debug_lines(mock_debug: MagicMock) -> list[str]:
+    """Render the messages passed to a patched ``_LOGGER.debug``."""
+    return [str(call.args[0]) % call.args[1:] for call in mock_debug.call_args_list]
+
+
+async def test_login_with_empty_result_is_unexplained_not_auth(client: SewClient, mocked: aioresponses) -> None:
     """A null return value is not a credentials rejection: the portal said nothing (issue #1)."""
     mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
     envelope = aura_envelope(None)
     envelope["actions"][0]["error"] = []
     mocked.post(AURA_URL, status=200, payload=envelope)
-    with caplog.at_level(logging.DEBUG), pytest.raises(SewLoginUnexplainedError):
+    with patch.object(sew_client._LOGGER, "debug") as debug, pytest.raises(SewLoginUnexplainedError):
         await client.async_login("user@example.com", "hunter2")
-    assert '"returnValue":null' in caplog.text
+    assert any('"returnValue":null' in line for line in debug_lines(debug))
 
 
 async def test_login_follows_redirect_carried_in_an_event(client: SewClient, mocked: aioresponses) -> None:
@@ -143,17 +147,12 @@ async def test_login_follows_redirect_carried_in_an_event(client: SewClient, moc
     assert result.mfa_required is True
 
 
-async def test_login_debug_log_masks_session_ids(
-    client: SewClient, mocked: aioresponses, caplog: pytest.LogCaptureFixture
-) -> None:
-    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+def test_redacted_envelope_masks_session_ids() -> None:
     envelope = aura_envelope(None)
     envelope["events"] = [{"descriptor": "markup://aura:redirect", "attributes": {"values": {"url": FRONTDOOR}}}]
-    mocked.post(AURA_URL, status=200, payload=envelope)
-    mocked.get(FRONTDOOR, status=200, body="<html>nothing useful</html>")
-    with caplog.at_level(logging.DEBUG), pytest.raises(SewProtocolError, match="Unexpected page"):
-        await client.async_login("user@example.com", "hunter2")
-    assert "FAKE-SID" not in caplog.text
+    text = sew_client._redact(envelope)
+    assert "FAKE-SID" not in text
+    assert "sid=<redacted>&retURL" in text
 
 
 async def test_login_without_mfa_lands_on_home(client: SewClient, mocked: aioresponses) -> None:
