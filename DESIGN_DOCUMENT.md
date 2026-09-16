@@ -170,7 +170,7 @@ pushes the result to entities with `async_set_updated_data`.
 | Wrong-code response text and whether the a4j redirect arrives as a header or a meta tag. | Redirect verified from the 2026-09-15 capture: the verify POST answers 200 with a `Location` header (the client checks the header first, meta tag second). Wrong-code text still unverified. |
 | `frontdoor.jsp` answers 200 with a script redirect, not a 302. | **Resolved 2026-09-17:** found on the first live run of the pure-HTTP login (b3). The client now follows the `location.replace(...)` URL from that page before looking for the MFA form. |
 | Session idle timeout. | **Resolved 2026-09-16:** alive after 2.0 h idle, dead after 4.0 h idle, so the timeout is > 2 h and ≤ 4 h (Salesforce's 2 h default or 4 h). `KEEPALIVE_MINUTES` stays at 30 (D16): the 2 h result is at the boundary, so the margin matters more than halving one page load an hour. |
-| First end-to-end run in a real Home Assistant. | Pending a one-time code from the account owner. |
+| First end-to-end run in a real Home Assistant. | **Done 2026-09-17** on v2.0.0b4: login, one-time code and setup completed on the author's production instance. |
 
 ## 10. Testing
 
