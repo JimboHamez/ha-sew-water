@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 import json
+import logging
 import re
 from typing import Any
 from urllib.parse import parse_qs
@@ -22,6 +23,7 @@ from sew_client import (  # loaded from file by conftest.py, without importing t
     SewBusyError,
     SewClient,
     SewConnectionError,
+    SewLoginUnexplainedError,
     SewProtocolError,
 )
 
@@ -114,6 +116,44 @@ async def test_login_rejects_bad_credentials(client: SewClient, mocked: aiorespo
     mocked.post(AURA_URL, status=200, payload=aura_envelope("Your login attempt has failed. Please try again."))
     with pytest.raises(SewAuthError, match="login attempt has failed"):
         await client.async_login("user@example.com", "wrong")
+
+
+async def test_login_with_empty_result_is_unexplained_not_auth(
+    client: SewClient, mocked: aioresponses, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A null return value is not a credentials rejection: the portal said nothing (issue #1)."""
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    envelope = aura_envelope(None)
+    envelope["actions"][0]["error"] = []
+    mocked.post(AURA_URL, status=200, payload=envelope)
+    with caplog.at_level(logging.DEBUG), pytest.raises(SewLoginUnexplainedError):
+        await client.async_login("user@example.com", "hunter2")
+    assert '"returnValue":null' in caplog.text
+
+
+async def test_login_follows_redirect_carried_in_an_event(client: SewClient, mocked: aioresponses) -> None:
+    """``aura.redirect`` puts the frontdoor URL in an event with a null return value."""
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    envelope = aura_envelope(None)
+    envelope["events"] = [{"descriptor": "markup://aura:redirect", "attributes": {"values": {"url": FRONTDOOR}}}]
+    mocked.post(AURA_URL, status=200, payload=envelope)
+    mocked.get(FRONTDOOR, status=302, headers={"Location": f"{BASE}/apex/PortalMFALoginFlow?retURL=%2F"})
+    mocked.get(f"{BASE}/apex/PortalMFALoginFlow?retURL=%2F", status=200, body=mfa_channel_page())
+    result = await client.async_login("user@example.com", "hunter2")
+    assert result.mfa_required is True
+
+
+async def test_login_debug_log_masks_session_ids(
+    client: SewClient, mocked: aioresponses, caplog: pytest.LogCaptureFixture
+) -> None:
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    envelope = aura_envelope(None)
+    envelope["events"] = [{"descriptor": "markup://aura:redirect", "attributes": {"values": {"url": FRONTDOOR}}}]
+    mocked.post(AURA_URL, status=200, payload=envelope)
+    mocked.get(FRONTDOOR, status=200, body="<html>nothing useful</html>")
+    with caplog.at_level(logging.DEBUG), pytest.raises(SewProtocolError, match="Unexpected page"):
+        await client.async_login("user@example.com", "hunter2")
+    assert "FAKE-SID" not in caplog.text
 
 
 async def test_login_without_mfa_lands_on_home(client: SewClient, mocked: aioresponses) -> None:

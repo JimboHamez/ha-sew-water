@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import logging
+import re
 from typing import Any
 
 import aiohttp
@@ -43,9 +44,13 @@ from .const import (
     MIN_SCAN_INTERVAL,
 )
 from .coordinator import SewConfigEntry
-from .sew_client import SewAuthError, SewClient, SewConnectionError, SewError
+from .sew_client import SewAuthError, SewClient, SewConnectionError, SewError, SewLoginUnexplainedError
 
 _LOGGER = logging.getLogger(__name__)
+
+# Deliberately loose: one "@" with something either side and a dot in the domain. It catches typos
+# and pasted junk before a round trip to the portal without rejecting unusual but valid addresses.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 USERNAME_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="username"))
 PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password"))
@@ -114,6 +119,9 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
             errors["base"] = "invalid_auth"
         except SewConnectionError:
             errors["base"] = "cannot_connect"
+        except SewLoginUnexplainedError:
+            _LOGGER.warning("The portal neither accepted the login nor said why; enable debug logging for the response")
+            errors["base"] = "login_unexplained"
         except SewError:
             _LOGGER.exception("Unexpected portal response during login")
             errors["base"] = "unknown"
@@ -165,7 +173,9 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._username = user_input[CONF_USERNAME].strip()
             self._password = user_input[CONF_PASSWORD]
-            if (result := await self._async_login(errors)) is not None:
+            if not _EMAIL_RE.match(self._username):
+                errors[CONF_USERNAME] = "invalid_email"
+            elif (result := await self._async_login(errors)) is not None:
                 return result
         return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors)
 
@@ -223,7 +233,9 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             self._username = user_input[CONF_USERNAME].strip()
             self._password = user_input[CONF_PASSWORD]
-            if (result := await self._async_login(errors)) is not None:
+            if not _EMAIL_RE.match(self._username):
+                errors[CONF_USERNAME] = "invalid_email"
+            elif (result := await self._async_login(errors)) is not None:
                 return result
         schema = vol.Schema(
             {

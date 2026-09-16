@@ -5,6 +5,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Setup reported "The email address or password was not accepted" when the portal's login call
+  returned nothing at all (no redirect and no rejection text), which is not a credentials failure
+  (#1). That case now shows its own message asking for a debug log, the full portal response is
+  logged at debug level with session IDs masked, and a login redirect delivered as an Aura event
+  rather than a return value is followed.
+
+### Added
+- The email address is checked for a plausible format before the portal is contacted; a typo shows
+  an error on the field instead of a round trip and a misleading rejection.
+
 ### Changed
 - Documentation: the portal's idle timeout has been measured at between 2 and 4 hours (alive after
   2 h idle, dead after 4 h). The 30-minute keep-alive is unchanged; the README and design document

@@ -25,6 +25,7 @@ from custom_components.sew_water.sew_client import (
     LoginResult,
     SewAuthError,
     SewConnectionError,
+    SewLoginUnexplainedError,
     SewProtocolError,
 )
 
@@ -97,6 +98,21 @@ async def test_username_is_stripped_and_lowercased_for_unique_id(hass: HomeAssis
     assert ("login", ("User@Example.com", PASSWORD)) in fake_client.calls
 
 
+@pytest.mark.parametrize("address", ["user", "user@", "@example.com", "user@example", "user example@x.com", " "])
+async def test_malformed_email_is_rejected_before_login(
+    hass: HomeAssistant, fake_client: FakeClient, address: str
+) -> None:
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], {CONF_USERNAME: address, CONF_PASSWORD: PASSWORD})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {CONF_USERNAME: "invalid_email"}
+    assert not fake_client.calls
+
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    assert result["step_id"] == "mfa_channel"
+
+
 async def test_flow_without_mfa_skips_code_steps(hass: HomeAssistant, fake_client: FakeClient) -> None:
     fake_client.login_result = LoginResult(mfa_required=False, channels=())
     result = await start_user_flow(hass)
@@ -110,6 +126,7 @@ async def test_flow_without_mfa_skips_code_steps(hass: HomeAssistant, fake_clien
     [
         (SewAuthError("bad"), "invalid_auth"),
         (SewConnectionError("down"), "cannot_connect"),
+        (SewLoginUnexplainedError("silent"), "login_unexplained"),
         (SewProtocolError("odd"), "unknown"),
     ],
 )
@@ -336,6 +353,17 @@ async def test_reconfigure_login_error_is_recoverable(
     result = await submit(hass, result["flow_id"], {CONF_USERNAME: USERNAME, CONF_PASSWORD: PASSWORD})
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
+
+
+async def test_reconfigure_rejects_malformed_email(
+    hass: HomeAssistant, fake_client: FakeClient, mock_config_entry: MockConfigEntry
+) -> None:
+    result = await start_reconfigure(hass, mock_config_entry)
+    result = await submit(hass, result["flow_id"], {CONF_USERNAME: "not-an-address", CONF_PASSWORD: PASSWORD})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "reconfigure"
+    assert result["errors"] == {CONF_USERNAME: "invalid_email"}
+    assert not fake_client.calls
 
 
 async def test_reconfigure_with_different_account_aborts(

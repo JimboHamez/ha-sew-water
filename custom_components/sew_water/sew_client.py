@@ -77,6 +77,8 @@ _MFA_ERROR_RE = re.compile(
 )
 # Salesforce reports throttling as an Apex error message, not as an HTTP status.
 _BUSY_RE = re.compile(r"concurrent requests limit|request limit exceeded|too many requests", re.IGNORECASE)
+_FRONTDOOR_MARKER = "frontdoor.jsp"
+_SID_RE = re.compile(r"(sid=)[^&\"'\s]+", re.IGNORECASE)
 
 
 class SewError(Exception):
@@ -106,6 +108,14 @@ class SewAuthError(SewError):
 
 class SewProtocolError(SewError):
     """The portal responded with something the client does not understand."""
+
+
+class SewLoginUnexplainedError(SewProtocolError):
+    """The portal neither accepted the login nor said why.
+
+    The login action succeeded but returned no redirect and no rejection text, so the client cannot
+    tell whether the credentials were wrong or the portal wants something else from this account.
+    """
 
 
 @dataclass(frozen=True)
@@ -321,6 +331,22 @@ def _records(value: Any) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)]
 
 
+def _find_frontdoor(node: Any) -> str | None:
+    """Return the first string in a JSON structure that looks like a frontdoor URL."""
+    if isinstance(node, str):
+        return node if _FRONTDOOR_MARKER in node else None
+    children = node.values() if isinstance(node, dict) else node if isinstance(node, list) else ()
+    for child in children:
+        if (found := _find_frontdoor(child)) is not None:
+            return found
+    return None
+
+
+def _redact(envelope: dict[str, Any]) -> str:
+    """Serialise an Aura envelope for a debug log with session IDs masked."""
+    return _SID_RE.sub(r"\1<redacted>", json.dumps(envelope, separators=(",", ":"))[:2000])
+
+
 class SewClient:
     """Async client for the South East Water portal.
 
@@ -385,6 +411,22 @@ class SewClient:
     ) -> list[dict[str, Any]]:
         """Send one Aura message and return its list of action results.
 
+        See ``_aura_envelope`` for the arguments and errors.
+        """
+        envelope = await self._aura_envelope(actions, context, token, page_uri, resync=resync)
+        return cast(list[dict[str, Any]], envelope["actions"])
+
+    async def _aura_envelope(
+        self,
+        actions: list[dict[str, Any]],
+        context: AuraContext,
+        token: str | None,
+        page_uri: str,
+        *,
+        resync: bool = True,
+    ) -> dict[str, Any]:
+        """Send one Aura message and return the whole response envelope.
+
         Args:
             actions: Fully formed action objects (``descriptor``, ``params``...). IDs are assigned here.
             context: Aura context to send.
@@ -432,14 +474,14 @@ class SewClient:
                 if not await self._load_home():
                     raise SewAuthError("Portal session is no longer valid")
                 assert self._context is not None and self._token is not None
-                return await self._aura(actions, self._context, self._token, page_uri, resync=False)
+                return await self._aura_envelope(actions, self._context, self._token, page_uri, resync=False)
             if _BUSY_RE.search(detail):
                 raise SewBusyError(f"Portal is throttling requests: {detail}")
             raise SewProtocolError(f"Aura exception event: {descriptor or detail}")
         results = envelope.get("actions")
         if not isinstance(results, list) or len(results) != len(actions):
             raise SewProtocolError("Aura response has an unexpected number of actions")
-        return cast(list[dict[str, Any]], results)
+        return cast(dict[str, Any], envelope)
 
     @staticmethod
     def _action_value(result: dict[str, Any]) -> Any:
@@ -523,12 +565,19 @@ class SewClient:
             "descriptor": "apex://cm_LoginAURA/ACTION$login",
             "params": {"password": password, "startUrl": "/", "username": username},
         }
-        (result,) = await self._aura([action], login_ctx, None, LOGIN_PATH)
+        envelope = await self._aura_envelope([action], login_ctx, None, LOGIN_PATH)
+        (result,) = envelope["actions"]
         value = self._action_value(result)
-        if not isinstance(value, str) or "frontdoor.jsp" not in value:
-            _LOGGER.debug("Login rejected: %s", value)
-            raise SewAuthError(str(value) if value else "Login rejected")
-        frontdoor = URL(value)
+        # The controller normally returns the frontdoor URL as the action's value; fall back to a
+        # redirect carried elsewhere in the envelope (``aura.redirect`` puts it in an event).
+        redirect = value if isinstance(value, str) and _FRONTDOOR_MARKER in value else _find_frontdoor(envelope)
+        if redirect is None:
+            if isinstance(value, str) and value:
+                _LOGGER.debug("Login rejected: %s", value)
+                raise SewAuthError(value)
+            _LOGGER.debug("Login gave neither a redirect nor a reason; response: %s", _redact(envelope))
+            raise SewLoginUnexplainedError("The portal returned no login redirect and no rejection message")
+        frontdoor = URL(redirect)
         if not frontdoor.is_absolute():
             frontdoor = self._base.join(frontdoor)
         resp, page = await self._request("GET", frontdoor)

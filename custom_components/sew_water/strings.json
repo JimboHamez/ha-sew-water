@@ -65,6 +65,8 @@
       "cannot_connect": "Could not reach the South East Water portal.",
       "invalid_auth": "The email address or password was not accepted.",
       "invalid_code": "The code was not accepted. Check it and try again.",
+      "invalid_email": "Enter a valid email address.",
+      "login_unexplained": "The portal did not accept the sign-in but gave no reason. Check that these details work at my.southeastwater.com.au, then enable debug logging for the integration, try again and open an issue with the log.",
       "no_mfa_channel": "The portal did not offer a way to send a code.",
       "unknown": "The portal responded unexpectedly. Check the logs for details."
     },
