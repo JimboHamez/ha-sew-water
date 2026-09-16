@@ -3,7 +3,9 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.0.0b4] — 2026-09-17
+
+Fourth beta. Fixes the login failing at the portal's redirect step, found on the first live run of b3.
 
 ### Fixed
 - Login failed with "MFA form not found on page" on every account. The portal's `frontdoor.jsp`
