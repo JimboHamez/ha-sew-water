@@ -39,7 +39,7 @@ untestable), YAML configuration, PyPI packaging.
 | D13 | Billing-account ID, meter record ID and meter serial are not entities and not on the device card. | They identify the customer's account; as entities they would be persisted in the recorder and appear in every state dump. They stay in the config entry (needed for API calls), are redacted from diagnostics, and are logged once at debug level on startup for checking. |
 | D14 | Throttling is detected from Salesforce's Apex error text ("concurrent requests limit exceeded"), plus HTTP 429/503 with `Retry-After` for good measure, and surfaced as `SewBusyError` → `UpdateFailed(retry_after=15 min)`. Usage batches are 30 actions and the daily poll carries up to 10 min of random jitter. | The core Salesforce platform does not use 429 for Aura requests; the limit that applies is the org-wide cap of 10 synchronous Apex requests running > 5 s, shared by every portal user. Keeping each batch under ~3 s stays out of that pool, jitter avoids installations colliding, and a short retry beats waiting for the next day. |
 | D15 | `clientOutOfSync` reloads the home page for a fresh Aura context and retries once. | It means the cached `fwuid` is stale after a Salesforce release, not that the session is dead; treating it as an auth failure would demand a needless one-time code. |
-| D16 | A keep-alive loads `/s/` every `KEEPALIVE_MINUTES` (30) between polls, skipped when the portal was touched more recently than that; a dead session starts reauth directly. | The portal drops a session idle for 24 h and daily polls are always more than 24 h apart, so without it every poll would need a new code. 30 min is the only interval proven so far (22 h with no failure); it is one page load and will be relaxed once the idle timeout is known. |
+| D16 | A keep-alive loads `/s/` every `KEEPALIVE_MINUTES` (30) between polls, skipped when the portal was touched more recently than that; a dead session starts reauth directly. | The portal's idle timeout is between 2 h and 4 h (measured 2026-09-16: alive after 2.0 h idle, dead after 4.0 h; Salesforce offers 2 h or 4 h at that range, so it is treated as 2 h). Daily polls are 24 h apart, so without it every poll would need a new code. 30 min is one page load, tolerates three missed ticks before the 2 h mark, and is the interval proven over 22 h. |
 
 ## 3. Architecture
 
@@ -117,7 +117,8 @@ setup ──▶ login+MFA ──▶ cookies saved in entry.data
 - `export_cookies` filters the jar to the portal domain and produces a JSON-serialisable list.
   Cookies are written back only when they changed, to avoid needless entry updates.
 - Measured lifetime: a session kept alive with a request every 30 minutes survived 22 h with no
-  failures; left idle for 24 h it was dead. The exact idle timeout is being measured (see §9).
+  failures and no absolute cap was seen. Idle, it was still alive after 2.0 h and dead after 4.0 h
+  (staircase 2 h / 4 h / 8 h / 12 h, 2026-09-15/16), so the idle timeout is > 2 h and ≤ 4 h.
 - Keep-alive (D16): `async_track_time_interval` every `KEEPALIVE_MINUTES`, registered from
   `async_setup_entry` and cancelled with the entry. It calls `async_is_alive()` (one `GET /s/`), writes
   back refreshed cookies, and skips when the entry is not loaded, a reauth flow is already open, or a
@@ -167,7 +168,7 @@ pushes the result to entities with `async_set_updated_data`.
 | Item | Status |
 |---|---|
 | Wrong-code response text and whether the a4j redirect arrives as a header or a meta tag. | Client handles both forms; unverified which the portal uses. |
-| Session idle timeout. | Measured: alive after 22 h with 30-min pings, **dead after 24 h idle** (2026-09-15). A staircase run (2 h / 4 h / 8 h / 12 h idle) is scheduled to find the exact value; `KEEPALIVE_MINUTES` (D16) can then be relaxed. |
+| Session idle timeout. | **Resolved 2026-09-16:** alive after 2.0 h idle, dead after 4.0 h idle, so the timeout is > 2 h and ≤ 4 h (Salesforce's 2 h default or 4 h). `KEEPALIVE_MINUTES` stays at 30 (D16): the 2 h result is at the boundary, so the margin matters more than halving one page load an hour. |
 | First end-to-end run in a real Home Assistant. | Pending a one-time code from the account owner. |
 
 ## 10. Testing

@@ -162,7 +162,7 @@ To change your portal password, or to force a fresh login without waiting for th
 ## How it works
 
 - **Session reuse** — the cookies from the one login you did at setup are stored in the config entry and re-sent on every poll. Each successful poll writes the refreshed cookies back, so the session survives Home Assistant restarts.
-- **Keep-alive** — the portal drops a session that sits idle for a day, which is less than the gap between daily polls. So between polls the integration loads the portal home page once every 30 minutes (a single request, no data fetched) to keep the session alive. If that check finds the session gone, the *Reauthentication required* card appears straight away rather than at the next poll.
+- **Keep-alive** — the portal drops a session that sits idle for more than about two hours (measured: still alive after 2 hours idle, gone after 4), far less than the gap between daily polls. So between polls the integration loads the portal home page once every 30 minutes (a single request, no data fetched) to keep the session alive. If that check finds the session gone, the *Reauthentication required* card appears straight away rather than at the next poll.
 - **Trailing re-import** — every poll fetches the last 30 days in one batched request and re-imports them as hourly statistics (24 rows per day). Rows are keyed by their start hour, so re-importing overwrites in place: late-published days get filled in and corrections are applied without duplicates. The first poll after setup imports 90 days.
 - **Statistics and sensors, not one or the other** — a sensor cannot carry retroactive history and a statistic cannot drive a card or an automation, so the integration keeps both. The statistic is the source of truth; the *Total usage* sensor mirrors its running total.
 - **02:00 local poll** — the previous day's readings are usually published by then. The next poll is always scheduled as "next 02:00" (plus a few random minutes so every installation doesn't hit the portal at the same second), so it never drifts. If the portal reports it is busy, the poll retries after 15 minutes rather than waiting a day.
@@ -302,7 +302,6 @@ Debug output never includes your password, cookies or one-time codes. Account id
 
 - **Recycled water** — not supported; the author has no recycled meter to test against. Contributions welcome.
 - **Yarra Valley Water** — runs on the same Salesforce Experience Cloud backend and the client could be adapted, but it is untested and not included.
-- **Session lifetime** — measuring how long the portal keeps an idle session so the re-authentication cadence can be documented.
 
 Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items).
 

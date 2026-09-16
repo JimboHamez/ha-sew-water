@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- Documentation: the portal's idle timeout has been measured at between 2 and 4 hours (alive after
+  2 h idle, dead after 4 h). The 30-minute keep-alive is unchanged; the README and design document
+  now give the measured figure instead of "about a day".
+
 ## [2.0.0b2] — 2026-09-15
 
 Second beta. Fixes account discovery against the live portal, keeps the session alive between polls,
