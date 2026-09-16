@@ -71,6 +71,9 @@ _AURA_CONTEXT_RE = re.compile(r"/s/sfsites/l/(%7B.+?%7D)/[a-z]+\.js", re.IGNOREC
 _TOKEN_COOKIE_NAME_RE = re.compile(r'"eikoocnekot"\s*:\s*"([^"]+)"')
 _VIEWSTATE_PREFIX = "com.salesforce.visualforce.ViewState"
 _META_LOCATION_RE = re.compile(r'<meta\s+name="Location"\s+content="([^"]+)"', re.IGNORECASE)
+# ``frontdoor.jsp`` answers 200 with a page whose script performs the redirect; the noscript link
+# carries the same URL.
+_SCRIPT_REDIRECT_RE = re.compile(r'location\.(?:replace\(|href\s*=\s*)"([^"]+)"', re.IGNORECASE)
 _MFA_ERROR_RE = re.compile(
     r"(?:incorrect|invalid|expired|try again|locked|too many|unable|failed)[^<]{0,120}",
     re.IGNORECASE,
@@ -581,6 +584,10 @@ class SewClient:
         if not frontdoor.is_absolute():
             frontdoor = self._base.join(frontdoor)
         resp, page = await self._request("GET", frontdoor)
+        if (scripted := _SCRIPT_REDIRECT_RE.search(page)) and _FRONTDOOR_MARKER in resp.url.path:
+            # The session cookies are set by this response; the page itself only redirects.
+            _LOGGER.debug("Following the frontdoor script redirect")
+            resp, page = await self._request("GET", self._base.join(URL(scripted.group(1))))
         if MFA_PAGE_PATH.lower() in resp.url.path.lower() or MFA_FORM_PATH in page:
             self._mfa_form = _parse_mfa_form(page)
             return LoginResult(mfa_required=True, channels=tuple(self._mfa_form.channels))

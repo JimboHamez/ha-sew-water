@@ -155,6 +155,35 @@ def test_redacted_envelope_masks_session_ids() -> None:
     assert "sid=<redacted>&retURL" in text
 
 
+FRONTDOOR_PAGE = """<html><head><meta HTTP-EQUIV="PRAGMA" CONTENT="NO-CACHE"></head><body>
+<script>var tm=null;function lhdoredir(){tm&&(window.clearTimeout(tm),tm=null);window.location.replace?
+window.location.replace("{target}"):window.location.href="{target}"}window.setTimeout?
+tm=window.setTimeout(lhdoredir,1E3):lhdoredir();</script>
+<noscript>Javascript is required. Click <a href="{target}">here</a> to continue.</noscript>
+</body></html>"""
+
+
+async def test_login_follows_frontdoor_script_redirect(client: SewClient, mocked: aioresponses) -> None:
+    """The live frontdoor page is a 200 whose script redirects to the MFA page; it has no form."""
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(FRONTDOOR))
+    target = f"{BASE}/apex/PortalMFALoginFlow?retURL=%2F"
+    mocked.get(FRONTDOOR, status=200, body=FRONTDOOR_PAGE.replace("{target}", target))
+    mocked.get(target, status=200, body=mfa_channel_page())
+    result = await client.async_login("user@example.com", "hunter2")
+    assert result.mfa_required is True
+    assert result.channels == ("Email", "SMS")
+
+
+async def test_login_follows_relative_frontdoor_script_redirect_home(client: SewClient, mocked: aioresponses) -> None:
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(FRONTDOOR))
+    mocked.get(FRONTDOOR, status=200, body=FRONTDOOR_PAGE.replace("{target}", "/s/"))
+    mock_home(mocked)
+    result = await client.async_login("user@example.com", "hunter2")
+    assert result.mfa_required is False
+
+
 async def test_login_without_mfa_lands_on_home(client: SewClient, mocked: aioresponses) -> None:
     mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
     mocked.post(AURA_URL, status=200, payload=aura_envelope(FRONTDOOR))

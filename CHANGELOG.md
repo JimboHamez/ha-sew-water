@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- Login failed with "MFA form not found on page" on every account. The portal's `frontdoor.jsp`
+  step answers with an HTML page whose script performs the redirect to the one-time-code page, not
+  with an HTTP redirect; the client took that page for the code page. It now follows the scripted
+  redirect. This was the first live run of the pure-HTTP login; the browser-based probes had hidden it.
+
 ## [2.0.0b3] — 2026-09-16
 
 Third beta. Stops an unexplained portal login response from being reported as bad
