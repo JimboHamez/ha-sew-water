@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Any
+from unittest.mock import patch
 
+import aiohttp
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.setup import async_setup_component
 from homeassistant.util import dt as dt_util
 import pytest
@@ -35,13 +39,26 @@ async def test_setup_restores_session_and_loads(
     assert hass.services.has_service(DOMAIN, SERVICE_IMPORT_FROM_DATE)
 
 
-async def test_unload_closes_session(
-    hass: HomeAssistant, setup_integration: MockConfigEntry, fake_client: FakeClient
-) -> None:
-    assert await hass.config_entries.async_unload(setup_integration.entry_id)
+@pytest.mark.usefixtures("fake_client")
+async def test_unload_releases_session(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
+    """The entry's session is created with auto-cleanup, so Home Assistant detaches it on unload."""
+    sessions: list[aiohttp.ClientSession] = []
+
+    def _record(*args: Any, **kwargs: Any) -> aiohttp.ClientSession:
+        sessions.append(session := async_create_clientsession(*args, **kwargs))
+        return session
+
+    mock_config_entry.add_to_hass(hass)
+    with patch("custom_components.sew_water.async_create_clientsession", side_effect=_record):
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-    assert setup_integration.state is ConfigEntryState.NOT_LOADED
-    assert fake_client.session.closed
+    assert len(sessions) == 1
+    assert not sessions[0].closed
+
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    assert mock_config_entry.state is ConfigEntryState.NOT_LOADED
+    assert sessions[0].closed
 
 
 async def test_setup_retries_when_portal_unreachable(

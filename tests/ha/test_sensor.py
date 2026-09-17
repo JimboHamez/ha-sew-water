@@ -49,7 +49,8 @@ async def test_daily_usage_reports_latest_day(hass: HomeAssistant, setup_integra
     assert state.state == "240"
     assert state.attributes["unit_of_measurement"] == "L"
     assert state.attributes["device_class"] == "volume"
-    assert state.attributes["state_class"] == "measurement"
+    assert state.attributes["state_class"] == "total"
+    assert state.attributes["last_reset"] == dt_util.start_of_local_day(yesterday).isoformat()
     assert state.attributes[ATTR_ATTRIBUTION] == ATTRIBUTION
     assert state.attributes["reading_date"] == yesterday.isoformat()
     assert state.attributes["hourly_readings"] == [10] * 24

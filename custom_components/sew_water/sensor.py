@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -18,6 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import SewConfigEntry, SewCoordinator, SewData
@@ -34,18 +35,20 @@ class SewSensorDescription(SensorEntityDescription):
 
     value_fn: Callable[[SewData], StateValue]
     attributes_fn: Callable[[SewData], dict[str, Any]] | None = None
+    last_reset_fn: Callable[[SewData], datetime | None] | None = None
 
 
 SENSORS: tuple[SewSensorDescription, ...] = (
     SewSensorDescription(
         key="daily_usage",
         translation_key="daily_usage",
-        # VOLUME (not WATER) so the daily figure can be a MEASUREMENT, which lets the recorder keep
-        # history for it; WATER only permits the total state classes.
         device_class=SensorDeviceClass.VOLUME,
-        state_class=SensorStateClass.MEASUREMENT,
+        # A day's usage is a total that starts again each day, so ``last_reset`` marks the start of the
+        # reading day; the volume device classes do not allow MEASUREMENT.
+        state_class=SensorStateClass.TOTAL,
         native_unit_of_measurement=UnitOfVolume.LITERS,
         value_fn=lambda data: data.latest.litres if data.latest else None,
+        last_reset_fn=lambda data: dt_util.start_of_local_day(data.latest.day) if data.latest else None,
         attributes_fn=lambda data: {
             "reading_date": data.latest.day.isoformat() if data.latest else None,
             "hourly_readings": list(data.latest.readings) if data.latest else None,
@@ -105,6 +108,13 @@ class SewSensor(CoordinatorEntity[SewCoordinator], SensorEntity):
     def native_value(self) -> StateValue:
         """Return the sensor value from the coordinator data."""
         return self.entity_description.value_fn(self.coordinator.data)
+
+    @property
+    def last_reset(self) -> datetime | None:
+        """Return when the value last started from zero, for descriptions that define it."""
+        if self.entity_description.last_reset_fn is None:
+            return None
+        return self.entity_description.last_reset_fn(self.coordinator.data)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

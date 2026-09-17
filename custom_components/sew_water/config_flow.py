@@ -90,9 +90,13 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @callback
     def async_remove(self) -> None:
-        """Close the flow's private HTTP session when the flow ends for any reason."""
+        """Release the flow's private HTTP session when the flow ends for any reason.
+
+        ``detach()`` closes the session but leaves Home Assistant's shared connector alone; ``close()`` on a
+        session made by ``async_create_clientsession`` is a stub that only logs a warning.
+        """
         if self._session is not None and not self._session.closed:
-            self.hass.async_create_task(self._session.close())
+            self._session.detach()
 
     # ------------------------------------------------------------------- helpers
 

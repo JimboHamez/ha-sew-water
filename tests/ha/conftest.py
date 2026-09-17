@@ -128,12 +128,12 @@ class FakeClient:
 
 
 class _FakeSession:
-    """Just enough of ``aiohttp.ClientSession`` for unload."""
+    """Just enough of ``aiohttp.ClientSession`` for the config flow to release it."""
 
     def __init__(self) -> None:
         self.closed = False
 
-    async def close(self) -> None:
+    def detach(self) -> None:
         self.closed = True
 
 

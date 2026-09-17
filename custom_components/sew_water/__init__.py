@@ -92,11 +92,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SewConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SewConfigEntry) -> bool:
-    """Stop polling and release the HTTP session."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if unload_ok:
-        await entry.runtime_data.client.session.close()
-    return unload_ok
+    """Stop polling; Home Assistant detaches the entry's HTTP session itself on unload."""
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

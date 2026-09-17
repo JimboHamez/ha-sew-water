@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- *Daily usage* used state class `measurement`, which Home Assistant rejects for a volume sensor
+  and logged a warning at startup (#1). It is now `total` with `last_reset` at the start of the
+  reading day, so its long-term statistics add each day's figure instead of the day-to-day change.
+- The config flow tried to close its private HTTP session with `close()`, which Home Assistant
+  turns into a warning ("closes the Home Assistant aiohttp session") without closing anything, so
+  the session leaked (#1). The flow now detaches the session; entry unload leaves the session to
+  Home Assistant, which detaches it itself.
+
 ## [2.0.0b4] — 2026-09-17
 
 Fourth beta. Fixes the login failing at the portal's redirect step, found on the first live run of b3.
