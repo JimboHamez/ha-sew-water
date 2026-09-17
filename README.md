@@ -35,17 +35,19 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.0.0b5
+## 🆕 What's new in v2.0.0
 
-**Fifth beta.** Both follow-ups from [issue #1](https://github.com/JimboHamez/ha-sew-water/issues/1) fixed, plus [#2](https://github.com/JimboHamez/ha-sew-water/issues/2):
+**First stable release of the pure-HTTP rewrite.** Same code as the last beta, promoted once the scheduled 02:00 poll had collected a fresh day of readings on a production instance and both open issues ([#1](https://github.com/JimboHamez/ha-sew-water/issues/1), [#2](https://github.com/JimboHamez/ha-sew-water/issues/2)) were confirmed fixed.
 
-- **Import your full history at setup.** The wizard's new last step takes your meter's installation date; everything from that day is imported in the background once setup finishes, with retries and a Repairs issue if the portal will not cooperate. `sew_water.import_from_date` still works for anything else.
-- ***Daily usage* no longer logs a state-class warning.** It is now `total` with `last_reset` at the start of the reading day, so its long-term statistics add each day's figure instead of the day-to-day change.
-- **The config flow no longer trips the "closes the Home Assistant aiohttp session" warning**, nor leaks the session behind it; entry unload leaves cleanup to Home Assistant.
+- **Nothing to install** — the portal is driven directly over HTTPS; Browserless, add-ons and extra Python packages are gone.
+- **One-time code at setup, then never again** — the session is kept, refreshed every 30 minutes and survives restarts; when the portal finally expires it, the standard *Reauthentication required* card asks for a new code only.
+- **Hourly statistics** — `sew_water:water_usage_mains` gets a row per hour, so every Energy dashboard view is real.
+- **Late data handled** — every 02:00 poll re-imports the last 30 days; the wizard can import your full history from the meter's installation date.
+- **Throttling-aware retries, Reconfigure flow, diagnostics, repair issues** and [Platinum](#home-assistant-quality-scale) on the quality scale.
 
-From b4: login fixed at the portal's script-redirect step. From b3: an unexplained login is no longer reported as a wrong password, email checked before the portal is contacted, keep-alive documented against a real measurement. From b2: discovery that works on accounts other than the author's, hourly statistics, session keep-alive, Reconfigure flow, repair issue for 1.x entries, Platinum on the [quality scale](#home-assistant-quality-scale). From b1: pure-HTTP client (nothing to install), one-time code setup, standard re-authentication, 02:00 poll with a 30-day re-import window, throttling-aware retries.
+**Upgrading from 1.x:** entries are not migrated — remove the old integration and add it again. Your existing statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0b5).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0).
 
 ---
 

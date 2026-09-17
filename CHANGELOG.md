@@ -3,6 +3,30 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.0.0] — 2026-09-18
+
+First stable release of the pure-HTTP rewrite. Same code as 2.0.0b5; promoted after the first
+scheduled 02:00 poll collected a new day of readings on a production instance and both open
+issues (#1, #2) were confirmed fixed.
+
+If you are upgrading from 1.x: entries are not migrated, so remove the old integration and add it
+again. Existing `sew_water:water_usage_mains` statistics are kept.
+
+Everything since 1.0.1, in short:
+
+- Talks to the portal directly over HTTPS — no Browserless, no add-ons, no extra packages.
+- Setup asks for the portal's one-time code once; the session is kept, refreshed every 30 minutes
+  and survives restarts. When the portal expires it, Home Assistant's standard reauth card asks
+  for a new code only.
+- Hourly rows in the `sew_water:water_usage_mains` long-term statistic, so the Energy dashboard's
+  hourly, daily, weekly and monthly views are all real.
+- Every 02:00 poll re-imports the last 30 days so late-published and corrected readings are
+  filled in. The setup wizard can import the full history from the meter's installation date.
+- Throttling-aware retries, Reconfigure flow, diagnostics, repair issues, Platinum on the quality
+  scale.
+
+See the beta entries below for the full detail.
+
 ## [2.0.0b5] — 2026-09-17
 
 Fifth beta. Both follow-up bugs from #1 fixed, and the wizard can now import the full history from
