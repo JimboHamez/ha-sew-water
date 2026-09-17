@@ -35,19 +35,17 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.0.0b4
+## 🆕 What's new in v2.0.0b5
 
-**Fourth beta.** Fixes sign-in failing with *The portal responded unexpectedly* (`MFA form not found on page`) for every account: the portal's session hand-off page redirects with a script rather than an HTTP redirect, and b3 mistook it for the code page. If you are on b3, update before setting up.
+**Fifth beta.** Both follow-ups from [issue #1](https://github.com/JimboHamez/ha-sew-water/issues/1) fixed, plus [#2](https://github.com/JimboHamez/ha-sew-water/issues/2):
 
-From b3, prompted by [issue #1](https://github.com/JimboHamez/ha-sew-water/issues/1):
+- **Import your full history at setup.** The wizard's new last step takes your meter's installation date; everything from that day is imported in the background once setup finishes, with retries and a Repairs issue if the portal will not cooperate. `sew_water.import_from_date` still works for anything else.
+- ***Daily usage* no longer logs a state-class warning.** It is now `total` with `last_reset` at the start of the reading day, so its long-term statistics add each day's figure instead of the day-to-day change.
+- **The config flow no longer trips the "closes the Home Assistant aiohttp session" warning**, nor leaks the session behind it; entry unload leaves cleanup to Home Assistant.
 
-- **An unexplained login is no longer reported as a wrong password.** The portal normally answers a bad password with an explicit message, but it can also answer with nothing at all. That case now gets its own message asking for a debug log, and the portal's full response is logged (session IDs masked).
-- **Email address checked first.** A typo in the address is flagged on the field before the portal is contacted.
-- **Keep-alive documented against a real measurement.** The portal's idle timeout is between 2 and 4 hours; the 30-minute keep-alive stays.
+From b4: login fixed at the portal's script-redirect step. From b3: an unexplained login is no longer reported as a wrong password, email checked before the portal is contacted, keep-alive documented against a real measurement. From b2: discovery that works on accounts other than the author's, hourly statistics, session keep-alive, Reconfigure flow, repair issue for 1.x entries, Platinum on the [quality scale](#home-assistant-quality-scale). From b1: pure-HTTP client (nothing to install), one-time code setup, standard re-authentication, 02:00 poll with a 30-day re-import window, throttling-aware retries.
 
-From b2: discovery that works on accounts other than the author's, hourly statistics, session keep-alive, Reconfigure flow, repair issue for 1.x entries, Platinum on the [quality scale](#home-assistant-quality-scale). From b1: pure-HTTP client (nothing to install), one-time code setup, standard re-authentication, 02:00 poll with a 30-day re-import window, throttling-aware retries.
-
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0b4).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0b5).
 
 ---
 

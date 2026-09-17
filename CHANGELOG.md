@@ -3,7 +3,10 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.0.0b5] — 2026-09-17
+
+Fifth beta. Both follow-up bugs from #1 fixed, and the wizard can now import the full history from
+your meter's installation date.
 
 ### Added
 - The setup wizard has an optional last step, *Import history from* (#2). Give it your meter's
