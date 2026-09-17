@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import logging
@@ -16,22 +17,27 @@ from homeassistant.components.recorder.statistics import (
 )
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigEntryState
 from homeassistant.const import UnitOfVolume
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import VolumeConverter
 
 from .const import (
+    BACKFILL_ATTEMPTS,
     BACKFILL_DAYS,
+    BACKFILL_RETRY_MINUTES,
     CONF_BILLING_ACCOUNT_ID,
     CONF_COOKIES,
+    CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    ISSUE_BACKFILL_FAILED,
     KEEPALIVE_MINUTES,
     POLL_HOUR,
     POLL_JITTER_MINUTES,
@@ -94,6 +100,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         super().__init__(hass, _LOGGER, config_entry=entry, name=DOMAIN, update_interval=self._interval(entry))
         self.client = client
         self.last_contact: datetime | None = None
+        self.backfill_task: asyncio.Task[None] | None = None
         self.ids = AccountIds(
             billing_account_id=entry.data[CONF_BILLING_ACCOUNT_ID],
             meter_id=entry.data[CONF_METER_ID],
@@ -159,6 +166,76 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         self.last_contact = now
         self._async_store_cookies()
         _LOGGER.debug("Keep-alive OK")
+
+    # ----------------------------------------------------------------- backfill
+
+    @property
+    def import_from(self) -> date | None:
+        """Return the installation date chosen at setup, if any."""
+        if not (raw := self.config_entry.data.get(CONF_IMPORT_FROM)):
+            return None
+        return dt_util.parse_date(raw)
+
+    @callback
+    def async_start_backfill(self) -> None:
+        """Import history back to the installation date in the background, unless it is already there.
+
+        The task is tied to the config entry, so unloading cancels it and the next setup starts it
+        again if the history is still missing.
+        """
+        if (start := self.import_from) is None:
+            return
+        self.backfill_task = self.config_entry.async_create_background_task(
+            self.hass, self._async_backfill(start), name=f"{DOMAIN} backfill"
+        )
+
+    async def _async_backfill(self, start: date) -> None:
+        """Run the full import from ``start`` with a few retries, and raise a repair issue if it fails."""
+        issue_id = f"{ISSUE_BACKFILL_FAILED}_{self.config_entry.entry_id}"
+        # The first refresh has only just queued its rows with the recorder; wait for the commit so
+        # the check below sees them.
+        await get_instance(self.hass).async_block_till_done()
+        if await self._async_has_statistics_on(start):
+            _LOGGER.debug("History back to %s is already imported", start)
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        for attempt in range(1, BACKFILL_ATTEMPTS + 1):
+            try:
+                await self.async_import_from(start)
+            except ValueError:
+                _LOGGER.error("Cannot import history from %s: the date is not before today", start)
+                return
+            except ConfigEntryAuthFailed:
+                _LOGGER.warning("History import from %s stopped: the portal session needs a new login code", start)
+                self.config_entry.async_start_reauth(self.hass)
+                return
+            except UpdateFailed as err:
+                if attempt == BACKFILL_ATTEMPTS:
+                    _LOGGER.error("History import from %s failed after %d attempts: %s", start, attempt, err)
+                    ir.async_create_issue(
+                        self.hass,
+                        DOMAIN,
+                        issue_id,
+                        is_fixable=False,
+                        severity=ir.IssueSeverity.WARNING,
+                        translation_key=ISSUE_BACKFILL_FAILED,
+                        translation_placeholders={"error": str(err), "start": start.isoformat()},
+                    )
+                    return
+                delay = err.retry_after or BACKFILL_RETRY_MINUTES * 60
+                _LOGGER.warning(
+                    "History import from %s failed (attempt %d of %d), retrying in %d s: %s",
+                    start,
+                    attempt,
+                    BACKFILL_ATTEMPTS,
+                    delay,
+                    err,
+                )
+                await asyncio.sleep(delay)
+            else:
+                _LOGGER.info("Imported history back to %s", start)
+                ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+                return
 
     # ------------------------------------------------------------------ polling
 
@@ -294,6 +371,21 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 continue
             rows.append((start, float(litres)))
         return rows
+
+    async def _async_has_statistics_on(self, day: date) -> bool:
+        """Return whether any statistic row exists for the local day ``day``."""
+        row_start = self._row_start(day)
+        rows = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period,
+            self.hass,
+            row_start,
+            row_start + timedelta(days=1),
+            {STATISTIC_ID_MAINS},
+            "hour",
+            None,
+            {"sum"},
+        )
+        return bool(rows.get(STATISTIC_ID_MAINS))
 
     async def _async_sum_before(self, day: date) -> float:
         """Return the running sum of the newest statistic row before ``day`` (0 if there is none)."""

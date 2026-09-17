@@ -104,7 +104,7 @@ The integration uses only `aiohttp`, which ships with Home Assistant — nothing
 
 **Settings → Devices & Services → Add Integration → South East Water**
 
-The wizard has three steps; steps 2 and 3 only appear when the portal asks for a one-time code (it always does today).
+The wizard has four steps; steps 2 and 3 only appear when the portal asks for a one-time code (it always does today).
 
 ### Step 1 — Sign in
 ![Step 1 — Sign in](images/config-step1-signin.png)
@@ -132,6 +132,14 @@ The wizard has three steps; steps 2 and 3 only appear when the portal asks for a
 | One-time code | The 6-digit code the portal just sent. Spaces and dashes are ignored. |
 
 The billing account and meter are discovered automatically once the code is accepted.
+
+### Step 4 — Import history (optional)
+
+| Field | Description |
+|---|---|
+| Import history from | The date your digital meter was installed, or any earlier day you want statistics from. Leave blank to import the last 90 days only. |
+
+Setup finishes straight away with the last 90 days; the rest is imported in the background, in one pass from the date you gave up to yesterday. If that pass fails (portal down or busy), it is retried a couple of times, then a **Repairs** issue tells you so — it runs again the next time the integration loads, or you can call `sew_water.import_from_date` yourself. Nothing is fetched twice: if the history back to that date is already in the recorder, the task exits immediately.
 
 ### Options
 
@@ -266,7 +274,7 @@ actions:
 - **History imported by earlier versions is daily.** Days imported before hourly statistics were introduced have a single row at 11:00; they are converted to hourly rows automatically as they fall inside the 30-day re-import window, or all at once with `sew_water.import_from_date`.
 - **One-time code on every login.** The portal offers no "remember this device". Setup, re-authentication and reconfigure each need a code; the integration keeps the session alive with a small request every 30 minutes so this is rare, but it cannot be avoided when the portal ends the session (for example after a portal release or a password change).
 - **One login, one meter.** If a portal login has several billing accounts or meters, only the first one returned by the portal is used. Mains water only — recycled-water meters are not read.
-- **Backfill on first setup is 90 days.** Use `sew_water.import_from_date` for anything earlier.
+- **Backfill on first setup is 90 days** unless you give an installation date in the wizard. `sew_water.import_from_date` covers anything else.
 - **Sensor totals versus statistics.** The *Total usage* sensor changes once per poll, so its history attributes the whole day to the minute the poll ran. Use the statistic for the Energy dashboard.
 - **The portal is not an API.** The integration speaks the portal's own web protocol; a change on South East Water's side can stop it working until the integration is updated. The client is isolated in one module to keep such fixes small.
 
@@ -286,7 +294,8 @@ actions:
 | *Daily usage* is `unknown` or the last reading date is several days old | The portal has not published recent days yet, or is returning zeros for them. | Check the portal's *Usage* page for the same days. The next 02:00 poll re-imports the last 30 days automatically; `sew_water.force_import` does it now. |
 | Entities are *unavailable* | The last poll failed (portal down, busy or unreachable). | The coordinator logs the cause once and retries — after 15 minutes if the portal reported it was busy, otherwise at the next scheduled poll. Call `sew_water.force_import` to retry immediately. |
 | Energy dashboard shows a big spike on one day | The `Total usage` *sensor* was chosen as the water source instead of the statistic. | Change the water source to `sew_water:water_usage_mains`. |
-| History is missing before a certain date | Only 90 days are imported on first setup. | Call `sew_water.import_from_date` with the date you want to start from. |
+| History is missing before a certain date | Only 90 days are imported on first setup unless you gave an installation date. | Call `sew_water.import_from_date` with the date you want to start from. |
+| **South East Water history import did not finish** repair issue | The background import from your installation date failed after its retries. | It runs again on the next reload or restart; or call `sew_water.import_from_date` with the same date to do it now. |
 
 **Debug logging** — add to `configuration.yaml` and restart, or use *Settings → Devices & Services → South East Water → ⋮ → Enable debug logging*:
 

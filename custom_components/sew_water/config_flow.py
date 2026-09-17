@@ -19,6 +19,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
+    DateSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -29,11 +30,13 @@ from homeassistant.helpers.selector import (
     TextSelectorConfig,
     TextSelectorType,
 )
+from homeassistant.util import dt as dt_util
 import voluptuous as vol
 
 from .const import (
     CONF_BILLING_ACCOUNT_ID,
     CONF_COOKIES,
+    CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
     CONF_MFA_CHANNEL,
@@ -67,6 +70,7 @@ STEP_CODE_SCHEMA = vol.Schema(
         ),
     }
 )
+STEP_HISTORY_SCHEMA = vol.Schema({vol.Optional(CONF_IMPORT_FROM): DateSelector()})
 
 
 class SewConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -81,6 +85,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         self._username: str | None = None
         self._password: str | None = None
         self._channels: tuple[str, ...] = ()
+        self._entry_data: dict[str, Any] | None = None
 
     @staticmethod
     @callback
@@ -167,7 +172,8 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
             self._abort_if_unique_id_mismatch(reason="wrong_account")
             return self.async_update_reload_and_abort(self._get_reconfigure_entry(), data_updates=session_data)
         self._abort_if_unique_id_configured()
-        return self.async_create_entry(title=self._username, data=session_data)
+        self._entry_data = session_data
+        return await self.async_step_history()
 
     # --------------------------------------------------------------------- steps
 
@@ -229,6 +235,23 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 return await self._async_finish()
         return self.async_show_form(step_id="mfa_code", data_schema=STEP_CODE_SCHEMA, errors=errors)
+
+    async def async_step_history(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Optionally take the meter's installation date; the history is imported after setup."""
+        errors: dict[str, str] = {}
+        assert self._entry_data is not None and self._username is not None
+        if user_input is not None:
+            data = dict(self._entry_data)
+            if raw := user_input.get(CONF_IMPORT_FROM):
+                if (start := dt_util.parse_date(raw)) is None:
+                    errors[CONF_IMPORT_FROM] = "invalid_date"
+                elif start >= dt_util.now().date():
+                    errors[CONF_IMPORT_FROM] = "start_in_future"
+                else:
+                    data[CONF_IMPORT_FROM] = start.isoformat()
+            if not errors:
+                return self.async_create_entry(title=self._username, data=data)
+        return self.async_show_form(step_id="history", data_schema=STEP_HISTORY_SCHEMA, errors=errors)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Sign in again with possibly changed credentials and replace the stored session."""

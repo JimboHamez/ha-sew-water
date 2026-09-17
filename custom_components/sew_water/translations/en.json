@@ -33,6 +33,16 @@
           "mfa_code": "Six digits; spaces and dashes are ignored."
         }
       },
+      "history": {
+        "title": "Import history",
+        "description": "Optionally enter the date your digital meter was installed. Everything from that day is imported into long-term statistics in the background after setup; leave it blank to import the last 90 days only. You can always import more later with the sew_water.import_from_date action.",
+        "data": {
+          "import_from": "Import history from"
+        },
+        "data_description": {
+          "import_from": "First day to import, usually the meter installation date. Must be before today."
+        }
+      },
       "reauth_confirm": {
         "title": "Sign in again",
         "description": "The saved session for {username} has expired. Continue to request a new one-time code.",
@@ -65,9 +75,11 @@
       "cannot_connect": "Could not reach the South East Water portal.",
       "invalid_auth": "The email address or password was not accepted.",
       "invalid_code": "The code was not accepted. Check it and try again.",
+      "invalid_date": "Enter a valid date.",
       "invalid_email": "Enter a valid email address.",
       "login_unexplained": "The portal did not accept the sign-in but gave no reason. Check that these details work at my.southeastwater.com.au, then enable debug logging for the integration, try again and open an issue with the log.",
       "no_mfa_channel": "The portal did not offer a way to send a code.",
+      "start_in_future": "The date must be before today.",
       "unknown": "The portal responded unexpectedly. Check the logs for details."
     },
     "abort": {
@@ -157,6 +169,10 @@
     }
   },
   "issues": {
+    "backfill_failed": {
+      "title": "South East Water history import did not finish",
+      "description": "Importing water usage from {start} failed: {error}. It will be tried again the next time the integration is loaded, or you can run the sew_water.import_from_date action with start_date {start} yourself."
+    },
     "v1_entry": {
       "title": "South East Water entry “{title}” needs to be set up again",
       "description": "This entry was created by an earlier version of the integration and holds no portal session, so it cannot be migrated. Delete it under Settings → Devices & services → South East Water, then add the integration again and sign in with a one-time code. Your existing water statistics are kept."

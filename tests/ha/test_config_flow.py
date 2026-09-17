@@ -2,18 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sew_water.const import (
     CONF_BILLING_ACCOUNT_ID,
     CONF_COOKIES,
+    CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
     CONF_MFA_CHANNEL,
@@ -71,6 +74,10 @@ async def test_full_flow_creates_entry(hass: HomeAssistant, fake_client: FakeCli
     assert result["step_id"] == "mfa_code"
 
     result = await submit(hass, result["flow_id"], {CONF_MFA_CODE: "123456"})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "history"
+
+    result = await submit(hass, result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == USERNAME
     assert result["data"] == {
@@ -92,6 +99,7 @@ async def test_username_is_stripped_and_lowercased_for_unique_id(hass: HomeAssis
     fake_client.login_result = LoginResult(mfa_required=False, channels=())
     result = await start_user_flow(hass)
     result = await submit(hass, result["flow_id"], {CONF_USERNAME: "  User@Example.com ", CONF_PASSWORD: PASSWORD})
+    result = await submit(hass, result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_USERNAME] == "User@Example.com"
     assert result["result"].unique_id == "user@example.com"
@@ -117,8 +125,39 @@ async def test_flow_without_mfa_skips_code_steps(hass: HomeAssistant, fake_clien
     fake_client.login_result = LoginResult(mfa_required=False, channels=())
     result = await start_user_flow(hass)
     result = await submit(hass, result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "history"
+    result = await submit(hass, result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert not any(name in ("request_code", "submit_code") for name, _ in fake_client.calls)
+
+
+async def test_history_step_stores_installation_date(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    start = dt_util.now().date() - timedelta(days=400)
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    result = await submit(hass, result["flow_id"], {CONF_IMPORT_FROM: start.isoformat()})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["data"][CONF_IMPORT_FROM] == start.isoformat()
+
+
+@pytest.mark.parametrize("offset_days", [0, 1])
+async def test_history_step_rejects_today_and_later(
+    hass: HomeAssistant, fake_client: FakeClient, offset_days: int
+) -> None:
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    bad = (dt_util.now().date() + timedelta(days=offset_days)).isoformat()
+    result = await submit(hass, result["flow_id"], {CONF_IMPORT_FROM: bad})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "history"
+    assert result["errors"] == {CONF_IMPORT_FROM: "start_in_future"}
+
+    result = await submit(hass, result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert CONF_IMPORT_FROM not in result["data"]
 
 
 @pytest.mark.parametrize(
@@ -191,7 +230,8 @@ async def test_submit_code_errors_allow_retry(
 
     fake_client.submit_code_error = None
     result = await submit(hass, result["flow_id"], {CONF_MFA_CODE: "123456"})
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "history"
 
 
 @pytest.mark.parametrize(

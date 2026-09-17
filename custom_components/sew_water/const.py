@@ -12,6 +12,7 @@ MANUFACTURER: Final = "South East Water"
 # Config-entry data keys (username/password use homeassistant.const).
 CONF_BILLING_ACCOUNT_ID: Final = "billing_account_id"
 CONF_COOKIES: Final = "cookies"
+CONF_IMPORT_FROM: Final = "import_from"
 CONF_METER_ID: Final = "meter_id"
 CONF_METER_SERIAL: Final = "meter_serial"
 CONF_MFA_CHANNEL: Final = "mfa_channel"
@@ -20,6 +21,10 @@ CONF_SCAN_INTERVAL: Final = "scan_interval"
 
 # Days of history imported the first time the integration runs.
 BACKFILL_DAYS: Final = 90
+# How many times the background import back to the installation date is tried per setup, and the
+# wait between tries when the portal gives no retry hint.
+BACKFILL_ATTEMPTS: Final = 3
+BACKFILL_RETRY_MINUTES: Final = 30
 # Days re-fetched on every poll, because the portal publishes readings late and back-fills them.
 TRAILING_WINDOW_DAYS: Final = 30
 # Default poll interval in minutes; at exactly one day the poll is aligned to POLL_HOUR local time.
@@ -34,6 +39,8 @@ POLL_JITTER_MINUTES: Final = 10
 # keep-alive is a single page load; 30 minutes tolerates three missed ticks and is the interval
 # proven over a full day of measurement.
 KEEPALIVE_MINUTES: Final = 30
+
+ISSUE_BACKFILL_FAILED: Final = "backfill_failed"
 
 SERVICE_FORCE_IMPORT: Final = "force_import"
 SERVICE_IMPORT_FROM_DATE: Final = "import_from_date"

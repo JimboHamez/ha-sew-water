@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The setup wizard has an optional last step, *Import history from* (#2). Give it your meter's
+  installation date and everything from that day is imported into long-term statistics in the
+  background once setup completes, so `sew_water.import_from_date` is no longer needed for a full
+  history. The import is retried if the portal is down or busy, raises a repair issue if it still
+  fails, and runs again on the next load until the history is there.
+
 ### Fixed
 - *Daily usage* used state class `measurement`, which Home Assistant rejects for a volume sensor
   and logged a warning at startup (#1). It is now `total` with `last_reset` at the start of the

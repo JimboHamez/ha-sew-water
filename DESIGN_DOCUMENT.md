@@ -155,6 +155,16 @@ A `SewBusyError` from the poll becomes `UpdateFailed(retry_after=…)`: the port
 `import_from_date` bypasses the window and imports `start..yesterday` in the same code path, then
 pushes the result to entities with `async_set_updated_data`.
 
+**Installation-date backfill.** The wizard's optional last step stores `import_from` in the entry.
+After every successful setup `async_start_backfill` runs `_async_backfill` as a config-entry
+background task (cancelled on unload, never blocks startup). It waits for the recorder to commit
+the first refresh, checks for any statistic row on the `import_from` day, and if there is none
+calls `async_import_from(start)` — the same full-range path as the service, so the running sums are
+rebuilt across the join. Failures are retried `BACKFILL_ATTEMPTS` times (`retry_after` or
+`BACKFILL_RETRY_MINUTES` apart), then a `backfill_failed` repair issue is raised; a dead session
+starts reauth. The presence check makes it idempotent, so it re-runs on every load until the
+history is there and does nothing afterwards.
+
 ## 8. Security and privacy
 
 - Credentials, cookies and Salesforce record ids are redacted from diagnostics; identifiers are never entities (D13).
