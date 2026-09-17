@@ -140,6 +140,12 @@ async def test_history_step_stores_installation_date(hass: HomeAssistant, fake_c
     result = await submit(hass, result["flow_id"], {CONF_IMPORT_FROM: start.isoformat()})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_IMPORT_FROM] == start.isoformat()
+    # The new entry starts the background import; let it finish before the recorder is torn down.
+    task = result["result"].runtime_data.backfill_task
+    assert task is not None
+    await task
+    yesterday = dt_util.now().date() - timedelta(days=1)
+    assert fake_client.fetch_ranges[-1] == (start, yesterday)
 
 
 @pytest.mark.parametrize("offset_days", [0, 1])

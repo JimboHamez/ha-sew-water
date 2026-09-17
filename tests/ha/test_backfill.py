@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import date, timedelta
 from unittest.mock import patch
 
@@ -62,7 +63,7 @@ async def setup_with_history(hass: HomeAssistant, start: date) -> MockConfigEntr
 
 
 @pytest.fixture(autouse=True)
-def _fast_retries() -> None:
+def _fast_retries() -> Iterator[None]:
     """Retry twice with no delay instead of three times half an hour apart."""
     with (
         patch.object(coordinator_module, "BACKFILL_ATTEMPTS", 2),
