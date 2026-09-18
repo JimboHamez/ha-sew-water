@@ -238,6 +238,8 @@ actions:
 
 **Possible leak: water flowing every hour overnight.** A property with no leak normally shows several zero hours between midnight and 5 am.
 
+If you *Test* the condition in the automation editor it will normally show ✗ — that means at least one overnight hour was dry on the latest reading day, i.e. no leak. It only shows ✓ on a day when water flowed in every hour from midnight to 5 am.
+
 ```yaml
 alias: Possible water leak
 triggers:
