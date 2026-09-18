@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.1.0] — 2026-09-18
 
 ### Added
 - *Poll time* option (#3). The daily poll was fixed at 02:00 local, but the portal publishes the

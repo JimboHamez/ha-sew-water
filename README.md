@@ -35,19 +35,13 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.0.0
+## 🆕 What's new in v2.1.0
 
-**First stable release of the pure-HTTP rewrite.** Same code as the last beta, promoted once the scheduled 02:00 poll had collected a fresh day of readings on a production instance and both open issues ([#1](https://github.com/JimboHamez/ha-sew-water/issues/1), [#2](https://github.com/JimboHamez/ha-sew-water/issues/2)) were confirmed fixed.
+- **Poll time is now an option** ([#3](https://github.com/JimboHamez/ha-sew-water/issues/3)). The daily poll was fixed at 02:00, but the portal publishes the previous day's readings later than that on at least some accounts, leaving *Daily usage* a day behind until the next poll. Set the time under ⚙ on the integration entry; the default stays 02:00.
 
-- **Nothing to install** — the portal is driven directly over HTTPS; Browserless, add-ons and extra Python packages are gone.
-- **One-time code at setup, then never again** — the session is kept, refreshed every 30 minutes and survives restarts; when the portal finally expires it, the standard *Reauthentication required* card asks for a new code only.
-- **Hourly statistics** — `sew_water:water_usage_mains` gets a row per hour, so every Energy dashboard view is real.
-- **Late data handled** — every 02:00 poll re-imports the last 30 days; the wizard can import your full history from the meter's installation date.
-- **Throttling-aware retries, Reconfigure flow, diagnostics, repair issues** and [Platinum](#home-assistant-quality-scale) on the quality scale.
+From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and [Platinum](#home-assistant-quality-scale) on the quality scale. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-**Upgrading from 1.x:** entries are not migrated — remove the old integration and add it again. Your existing statistics are kept.
-
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.0.0).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.1.0).
 
 ---
 
