@@ -10,15 +10,17 @@ from homeassistant.components.recorder.statistics import statistics_during_perio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
+import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 from pytest_homeassistant_custom_component.components.recorder.common import async_wait_recording_done
 
 from custom_components.sew_water.const import (
     CONF_COOKIES,
+    CONF_POLL_TIME,
     CONF_SCAN_INTERVAL,
+    DEFAULT_POLL_TIME,
     DOMAIN,
     KEEPALIVE_MINUTES,
-    POLL_HOUR,
     POLL_JITTER_MINUTES,
     STATISTIC_ID_MAINS,
 )
@@ -145,17 +147,41 @@ async def test_protocol_error_is_update_failed(
     assert "weird" in str(coordinator.last_exception)
 
 
-async def test_default_interval_targets_poll_hour_with_jitter(
-    hass: HomeAssistant, setup_integration: MockConfigEntry
-) -> None:
-    coordinator: SewCoordinator = setup_integration.runtime_data
+def _assert_pinned(coordinator: SewCoordinator, hour: int, minute: int) -> None:
     now = dt_util.now()
     assert coordinator.update_interval is not None
     target = now + coordinator.update_interval
-    expected = now.replace(hour=POLL_HOUR, minute=0, second=0, microsecond=0)
+    expected = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if expected <= now:
         expected += timedelta(days=1)
     assert timedelta(0) <= target - expected <= timedelta(minutes=POLL_JITTER_MINUTES)
+
+
+async def test_default_interval_targets_poll_time_with_jitter(
+    hass: HomeAssistant, setup_integration: MockConfigEntry
+) -> None:
+    assert DEFAULT_POLL_TIME == "02:00:00"
+    _assert_pinned(setup_integration.runtime_data, 2, 0)
+
+
+@pytest.mark.parametrize(
+    ("poll_time", "hour", "minute"),
+    [("10:30:00", 10, 30), ("not a time", 2, 0)],
+    ids=["custom", "invalid_falls_back_to_default"],
+)
+async def test_poll_time_option_pins_the_daily_poll(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    fake_client: FakeClient,
+    poll_time: str,
+    hour: int,
+    minute: int,
+) -> None:
+    mock_config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(mock_config_entry, options={CONF_POLL_TIME: poll_time})
+    assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
+    await hass.async_block_till_done()
+    _assert_pinned(mock_config_entry.runtime_data, hour, minute)
 
 
 async def test_custom_interval_is_used_verbatim(

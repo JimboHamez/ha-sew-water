@@ -147,7 +147,8 @@ Setup finishes straight away with the last 90 days; the rest is imported in the 
 
 | Field | Default | Description |
 |---|---|---|
-| Poll interval | 1440 min | Minutes between polls. At the default the poll is pinned to **02:00 local time** every day; any other value (minimum 60) is used as a plain interval. |
+| Poll interval | 1440 min | Minutes between polls. At the default the poll is pinned to the **poll time** below every day; any other value (minimum 60) is used as a plain interval. |
+| Poll time | 02:00 | Local time of the daily poll. Only used at the default interval. The portal publishes the previous day's readings during the morning; if *Daily usage* is still a day behind after the poll, move this later (10:00 has been reported to work). |
 
 ### Re-authentication
 
@@ -173,7 +174,7 @@ To change your portal password, or to force a fresh login without waiting for th
 - **Keep-alive** — the portal drops a session that sits idle for more than about two hours (measured: still alive after 2 hours idle, gone after 4), far less than the gap between daily polls. So between polls the integration loads the portal home page once every 30 minutes (a single request, no data fetched) to keep the session alive. If that check finds the session gone, the *Reauthentication required* card appears straight away rather than at the next poll.
 - **Trailing re-import** — every poll fetches the last 30 days in one batched request and re-imports them as hourly statistics (24 rows per day). Rows are keyed by their start hour, so re-importing overwrites in place: late-published days get filled in and corrections are applied without duplicates. The first poll after setup imports 90 days.
 - **Statistics and sensors, not one or the other** — a sensor cannot carry retroactive history and a statistic cannot drive a card or an automation, so the integration keeps both. The statistic is the source of truth; the *Total usage* sensor mirrors its running total.
-- **02:00 local poll** — the previous day's readings are usually published by then. The next poll is always scheduled as "next 02:00" (plus a few random minutes so every installation doesn't hit the portal at the same second), so it never drifts. If the portal reports it is busy, the poll retries after 15 minutes rather than waiting a day.
+- **Daily poll at a fixed local time** — 02:00 by default, changeable in the options. The next poll is always scheduled as "next poll time" (plus a few random minutes so every installation doesn't hit the portal at the same second), so it never drifts. If the portal reports it is busy, the poll retries after 15 minutes rather than waiting a day.
 - **Zero days** — the portal returns 24 zeros both for an unpublished day and for a genuinely empty one. The *Daily usage* / *Last reading date* sensors skip zero days; statistics import them as 0 L and a later poll corrects them if data appears.
 
 The protocol, the statistics rules and every design decision are in [DESIGN_DOCUMENT.md](DESIGN_DOCUMENT.md).
@@ -224,7 +225,7 @@ data:
 
 ## Automation examples
 
-**Alert when yesterday's usage was unusually high.** The sensor updates once a day after the 02:00 poll, so a state trigger fires at most once per day.
+**Alert when yesterday's usage was unusually high.** The sensor updates once a day after the daily poll, so a state trigger fires at most once per day.
 
 ```yaml
 alias: High water use yesterday
@@ -269,7 +270,7 @@ actions:
 
 ## Known limitations
 
-- **Data is a day or more behind.** The portal publishes a day's readings during the following day, sometimes later, and occasionally revises them. The integration polls at 02:00 and re-imports the last 30 days so gaps and corrections are filled in, but you will never see today's usage, and yesterday's may be zero until the following poll.
+- **Data is a day or more behind.** The portal publishes a day's readings during the following day, sometimes later, and occasionally revises them. The integration polls once a day (02:00 by default) and re-imports the last 30 days so gaps and corrections are filled in, but you will never see today's usage, and yesterday's may be zero until the following poll. If yesterday is *consistently* missing after the poll, set a later **Poll time** in the options.
 - **Hourly is the finest resolution.** The portal publishes hourly readings, so that is what the statistic stores; there is no finer data. On the day daylight saving starts (23 hours), the portal's 24th reading is folded into the last hour of that day.
 - **History imported by earlier versions is daily.** Days imported before hourly statistics were introduced have a single row at 11:00; they are converted to hourly rows automatically as they fall inside the 30-day re-import window, or all at once with `sew_water.import_from_date`.
 - **One-time code on every login.** The portal offers no "remember this device". Setup, re-authentication and reconfigure each need a code; the integration keeps the session alive with a small request every 30 minutes so this is rare, but it cannot be avoided when the portal ends the session (for example after a portal release or a password change).
@@ -291,7 +292,7 @@ actions:
 | Setup shows *The code was not accepted* | Wrong or expired code. | Codes are six digits and short-lived. Request a new one by going back a step. |
 | Setup shows *The portal responded unexpectedly* | The portal's pages or responses did not match what the integration expects. | Enable debug logging (below), retry, and open an issue with the log excerpt. It usually means the portal changed. |
 | Repair issue *needs to be set up again* | A config entry from an earlier integration version was found; it holds no portal session and cannot be migrated. | Delete that entry and add the integration again. Existing statistics are kept. |
-| *Daily usage* is `unknown` or the last reading date is several days old | The portal has not published recent days yet, or is returning zeros for them. | Check the portal's *Usage* page for the same days. The next 02:00 poll re-imports the last 30 days automatically; `sew_water.force_import` does it now. |
+| *Daily usage* is `unknown` or the last reading date is several days old | The portal has not published recent days yet, or is returning zeros for them. | Check the portal's *Usage* page for the same days. The next daily poll re-imports the last 30 days automatically; `sew_water.force_import` does it now. If this happens every day, set a later **Poll time** in the options. |
 | Entities are *unavailable* | The last poll failed (portal down, busy or unreachable). | The coordinator logs the cause once and retries — after 15 minutes if the portal reported it was busy, otherwise at the next scheduled poll. Call `sew_water.force_import` to retry immediately. |
 | Energy dashboard shows a big spike on one day | The `Total usage` *sensor* was chosen as the water source instead of the statistic. | Change the water source to `sew_water:water_usage_mains`. |
 | History is missing before a certain date | Only 90 days are imported on first setup unless you gave an installation date. | Call `sew_water.import_from_date` with the date you want to start from. |

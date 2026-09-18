@@ -17,6 +17,7 @@ CONF_METER_ID: Final = "meter_id"
 CONF_METER_SERIAL: Final = "meter_serial"
 CONF_MFA_CHANNEL: Final = "mfa_channel"
 CONF_MFA_CODE: Final = "mfa_code"
+CONF_POLL_TIME: Final = "poll_time"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 
 # Days of history imported the first time the integration runs.
@@ -27,11 +28,12 @@ BACKFILL_ATTEMPTS: Final = 3
 BACKFILL_RETRY_MINUTES: Final = 30
 # Days re-fetched on every poll, because the portal publishes readings late and back-fills them.
 TRAILING_WINDOW_DAYS: Final = 30
-# Default poll interval in minutes; at exactly one day the poll is aligned to POLL_HOUR local time.
+# Default poll interval in minutes; at exactly one day the poll is aligned to the poll time (local).
 DEFAULT_SCAN_INTERVAL: Final = 1440
 MIN_SCAN_INTERVAL: Final = 60
-# Local hour of day for the daily poll, when the previous day's readings are most likely published.
-POLL_HOUR: Final = 2
+# Default local time of day for the daily poll, as the time selector stores it (HH:MM:SS). The portal
+# publishes the previous day's readings during the morning; users whose readings land later can move it.
+DEFAULT_POLL_TIME: Final = "02:00:00"
 # Random delay added to the daily poll so installations do not all query the portal at once.
 POLL_JITTER_MINUTES: Final = 10
 # Minutes between keep-alive requests. The portal drops a session left idle for more than 2 hours

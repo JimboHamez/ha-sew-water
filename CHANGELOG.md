@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- *Poll time* option (#3). The daily poll was fixed at 02:00 local, but the portal publishes the
+  previous day's readings later than that on at least some accounts, so *Daily usage* ran a day
+  behind until the next poll. The time of the daily poll can now be set under the integration's
+  options; the default stays 02:00.
+
 ## [2.0.0] — 2026-09-18
 
 First stable release of the pure-HTTP rewrite. Same code as 2.0.0b5; promoted after the first

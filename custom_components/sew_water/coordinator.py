@@ -34,12 +34,13 @@ from .const import (
     CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
+    CONF_POLL_TIME,
     CONF_SCAN_INTERVAL,
+    DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     ISSUE_BACKFILL_FAILED,
     KEEPALIVE_MINUTES,
-    POLL_HOUR,
     POLL_JITTER_MINUTES,
     STATISTIC_ID_MAINS,
     TRAILING_WINDOW_DAYS,
@@ -113,16 +114,20 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
     def _interval(entry: SewConfigEntry) -> timedelta:
         """Return the time until the next poll.
 
-        At the default one-day interval the poll is pinned to ``POLL_HOUR`` local time so it runs when
-        the previous day's readings are most likely available, plus a random offset of up to
-        ``POLL_JITTER_MINUTES`` so installations do not all hit the portal in the same second; any
-        other interval is used as given.
+        At the default one-day interval the poll is pinned to the configured local poll time (option
+        ``poll_time``, default ``DEFAULT_POLL_TIME``) so it runs when the previous day's readings are
+        most likely available, plus a random offset of up to ``POLL_JITTER_MINUTES`` so installations
+        do not all hit the portal in the same second; any other interval is used as given.
         """
         minutes = int(entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
         if minutes != DEFAULT_SCAN_INTERVAL:
             return timedelta(minutes=minutes)
+        poll_time = dt_util.parse_time(entry.options.get(CONF_POLL_TIME, DEFAULT_POLL_TIME))
+        if poll_time is None:
+            poll_time = dt_util.parse_time(DEFAULT_POLL_TIME)
+        assert poll_time is not None
         now = dt_util.now()
-        next_run = now.replace(hour=POLL_HOUR, minute=0, second=0, microsecond=0)
+        next_run = now.replace(hour=poll_time.hour, minute=poll_time.minute, second=poll_time.second, microsecond=0)
         if next_run <= now:
             next_run += timedelta(days=1)
         return next_run - now + timedelta(seconds=random.uniform(0, POLL_JITTER_MINUTES * 60))
@@ -248,7 +253,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         try:
             data = await self._async_import(start, yesterday)
         finally:
-            # Re-evaluate the delay to the next poll so the daily run stays pinned to POLL_HOUR.
+            # Re-evaluate the delay to the next poll so the daily run stays pinned to the poll time.
             self.update_interval = self._interval(self.config_entry)
         return data
 

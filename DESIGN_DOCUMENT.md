@@ -28,7 +28,7 @@ untestable), YAML configuration, PyPI packaging.
 | D2 | Hourly resolution in long-term statistics (the portal's finest); daily in the sensors. | The portal returns 24 hourly readings per day at no extra cost, and hourly rows make every Energy dashboard view accurate. The sensors stay daily because that is the cadence at which data arrives. Changed from daily-only on 2026-09-15. |
 | D3 | First run imports 90 days; every poll re-imports the last 30 days. | 90 days fits one batched request. 30 days comfortably covers the portal's publication lag and corrections. |
 | D4 | Statistics **and** sensors. | A sensor cannot hold retroactive history; a statistic cannot drive automations or cards. |
-| D5 | Daily poll pinned to 02:00 local when the interval is the default (1440 min). | The previous day's readings are usually published by then; a fixed interval from HA start time would drift. |
+| D5 | Daily poll pinned to a configurable local time (option `poll_time`, default 02:00) when the interval is the default (1440 min). | A fixed interval from HA start time would drift. The portal publishes the previous day's readings at some point in the morning, later than 02:00 on at least two accounts (#3), so the time is user-adjustable; the default stays until the publication time is measured. |
 | D6 | Zero-reading days are shown as "not published" by the sensors but imported as 0 L. | The portal returns 24 zeros both for unpublished days and for old dates; the trailing re-import corrects a 0 once real data appears, so nothing is lost by importing it. |
 | D7 | Session cookies persisted in the config entry and refreshed after every poll. | This is what makes MFA a once-per-session event instead of once-per-poll, and what lets sessions survive restarts. |
 | D8 | Username and password stored in the config entry. | HA has no encrypted vault for integrations; `.storage` (mode 0600) is the standard. Storing the password means re-authentication needs only a new code. The password alone cannot open a session because the portal always demands a code. |
@@ -147,7 +147,7 @@ setup ──▶ login+MFA ──▶ cookies saved in entry.data
 
 `SewCoordinator._interval` recomputes `update_interval` after every poll:
 
-- interval == 1440 → `next 02:00 local − now` plus 0–10 min of random jitter (never a fixed 24 h, so it does not drift, and installations do not collide);
+- interval == 1440 → `next poll_time local − now` plus 0–10 min of random jitter (never a fixed 24 h, so it does not drift, and installations do not collide); an unparsable `poll_time` falls back to the default;
 - any other value → `timedelta(minutes=interval)` (minimum 60, enforced by the options selector).
 
 A `SewBusyError` from the poll becomes `UpdateFailed(retry_after=…)`: the portal's `Retry-After` if it sent one, else 15 minutes; the coordinator honours it for the next attempt and the daily schedule resumes after.

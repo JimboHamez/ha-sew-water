@@ -97,10 +97,12 @@
       "init": {
         "title": "Polling",
         "data": {
+          "poll_time": "Poll time",
           "scan_interval": "Poll interval"
         },
         "data_description": {
-          "scan_interval": "Minutes between polls. At the default of 1440 the poll runs once a day at 2 AM local time, when the previous day's readings are usually available."
+          "poll_time": "Local time of day for the daily poll. Only used at the default interval of 1440 minutes. The portal publishes the previous day's readings during the morning; if yesterday is still missing after the poll, move this later.",
+          "scan_interval": "Minutes between polls. At the default of 1440 the poll runs once a day at the poll time below; any other value is used as a plain interval."
         }
       }
     }

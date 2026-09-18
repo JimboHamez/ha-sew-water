@@ -21,6 +21,7 @@ from custom_components.sew_water.const import (
     CONF_METER_SERIAL,
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
+    CONF_POLL_TIME,
     CONF_SCAN_INTERVAL,
     DOMAIN,
 )
@@ -427,12 +428,16 @@ async def test_reconfigure_with_different_account_aborts(
 # ---------------------------------------------------------------------------- options
 
 
-async def test_options_flow_sets_scan_interval(hass: HomeAssistant, setup_integration: MockConfigEntry) -> None:
+async def test_options_flow_sets_scan_interval_and_poll_time(
+    hass: HomeAssistant, setup_integration: MockConfigEntry
+) -> None:
     result = await hass.config_entries.options.async_init(setup_integration.entry_id)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_SCAN_INTERVAL: 360})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_SCAN_INTERVAL: 360, CONF_POLL_TIME: "10:30:00"}
+    )
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert setup_integration.options == {CONF_SCAN_INTERVAL: 360}
+    assert setup_integration.options == {CONF_POLL_TIME: "10:30:00", CONF_SCAN_INTERVAL: 360}
     assert setup_integration.state is config_entries.ConfigEntryState.LOADED

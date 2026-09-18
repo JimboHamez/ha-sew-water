@@ -29,6 +29,7 @@ from homeassistant.helpers.selector import (
     TextSelector,
     TextSelectorConfig,
     TextSelectorType,
+    TimeSelector,
 )
 from homeassistant.util import dt as dt_util
 import voluptuous as vol
@@ -41,7 +42,9 @@ from .const import (
     CONF_METER_SERIAL,
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
+    CONF_POLL_TIME,
     CONF_SCAN_INTERVAL,
+    DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MIN_SCAN_INTERVAL,
@@ -319,20 +322,28 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class SewOptionsFlow(OptionsFlowWithReload):
-    """Let the user change the poll interval; the entry reloads automatically on save."""
+    """Let the user change the poll interval and time; the entry reloads automatically on save."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and save the options."""
         if user_input is not None:
-            return self.async_create_entry(data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])})
-        current = self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+            return self.async_create_entry(
+                data={
+                    CONF_POLL_TIME: user_input[CONF_POLL_TIME],
+                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                }
+            )
+        options = self.config_entry.options
         schema = vol.Schema(
             {
-                vol.Required(CONF_SCAN_INTERVAL, default=current): NumberSelector(
+                vol.Required(
+                    CONF_SCAN_INTERVAL, default=options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+                ): NumberSelector(
                     NumberSelectorConfig(
                         min=MIN_SCAN_INTERVAL, step=1, unit_of_measurement="min", mode=NumberSelectorMode.BOX
                     )
-                )
+                ),
+                vol.Required(CONF_POLL_TIME, default=options.get(CONF_POLL_TIME, DEFAULT_POLL_TIME)): TimeSelector(),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
