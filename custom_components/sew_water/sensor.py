@@ -15,13 +15,11 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.const import EntityCategory, UnitOfVolume
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import ATTRIBUTION, DOMAIN, MANUFACTURER
-from .coordinator import SewConfigEntry, SewCoordinator, SewData
+from .coordinator import SewConfigEntry, SewData
+from .entity import SewEntity
 
 # Entities read coordinator data only; no per-entity I/O to serialise.
 PARALLEL_UPDATES = 0
@@ -82,27 +80,10 @@ async def async_setup_entry(
     async_add_entities(SewSensor(coordinator, description) for description in SENSORS)
 
 
-class SewSensor(CoordinatorEntity[SewCoordinator], SensorEntity):
+class SewSensor(SewEntity, SensorEntity):
     """A value derived from the last portal poll."""
 
-    _attr_attribution = ATTRIBUTION
-    _attr_has_entity_name = True
     entity_description: SewSensorDescription
-
-    def __init__(self, coordinator: SewCoordinator, description: SewSensorDescription) -> None:
-        """Bind the entity to its description and the account's device."""
-        super().__init__(coordinator)
-        self.entity_description = description
-        # Keyed by the config entry, not the billing account, so account identifiers never reach the
-        # entity or device registries.
-        entry_id = coordinator.config_entry.entry_id
-        self._attr_unique_id = f"{entry_id}_{description.key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            manufacturer=MANUFACTURER,
-            model="Digital water meter",
-            name=MANUFACTURER,
-        )
 
     @property
     def native_value(self) -> StateValue:

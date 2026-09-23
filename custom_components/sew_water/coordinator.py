@@ -18,7 +18,7 @@ from homeassistant.components.recorder.statistics import (
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntry, ConfigEntryState
 from homeassistant.const import UnitOfVolume
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -256,6 +256,21 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             # Re-evaluate the delay to the next poll so the daily run stays pinned to the poll time.
             self.update_interval = self._interval(self.config_entry)
         return data
+
+    async def async_poll_now(self) -> None:
+        """Poll the portal outside the schedule, for the force-import action and the update button.
+
+        Raises:
+            HomeAssistantError: If the poll failed. An expired session has already started reauth.
+        """
+        # The coordinator swallows poll errors (and starts reauth itself), so report the failure here.
+        await self.async_refresh()
+        if not self.last_update_success:
+            raise HomeAssistantError(
+                translation_domain=DOMAIN,
+                translation_key="poll_failed",
+                translation_placeholders={"error": str(self.last_exception)},
+            ) from self.last_exception
 
     async def async_import_from(self, start: date) -> None:
         """Import every day from ``start`` to yesterday, then notify entities.

@@ -15,7 +15,7 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlowWithReload,
 )
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
@@ -340,7 +340,10 @@ class SewOptionsFlow(OptionsFlowWithReload):
                     CONF_SCAN_INTERVAL, default=options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
                 ): NumberSelector(
                     NumberSelectorConfig(
-                        min=MIN_SCAN_INTERVAL, step=1, unit_of_measurement="min", mode=NumberSelectorMode.BOX
+                        min=MIN_SCAN_INTERVAL,
+                        step=1,
+                        unit_of_measurement=UnitOfTime.MINUTES,
+                        mode=NumberSelectorMode.BOX,
                     )
                 ),
                 vol.Required(CONF_POLL_TIME, default=options.get(CONF_POLL_TIME, DEFAULT_POLL_TIME)): TimeSelector(),

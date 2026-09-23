@@ -12,8 +12,10 @@ rules:
   config-flow: done
   config-flow-test-coverage: done
   dependency-transparency:
-    status: done
-    comment: The only dependency is aiohttp, shipped with Home Assistant; the portal client is bundled.
+    status: todo
+    comment: >
+      The portal client is bundled as sew_client.py rather than published to PyPI from a public CI pipeline
+      and declared in the manifest requirements. Kept in-component by choice, so no tier is claimed.
   docs-actions: done
   docs-conditions:
     status: exempt
@@ -68,7 +70,9 @@ rules:
   docs-use-cases: done
   dynamic-devices:
     status: exempt
-    comment: One config entry is one account with one meter; devices are never added later.
+    comment: >
+      Only one config entry is allowed (single_config_entry) and it has one meter; devices are never added
+      later.
   entity-category: done
   entity-device-class: done
   entity-disabled-by-default:
@@ -88,6 +92,8 @@ rules:
     comment: One config entry is one account with one meter; removing the entry removes the device.
 
   # Platinum
-  async-dependency: done
+  async-dependency:
+    status: todo
+    comment: The bundled client is aiohttp-only with no blocking I/O, but it is not a separate dependency.
   inject-websession: done
   strict-typing: done

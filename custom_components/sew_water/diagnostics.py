@@ -9,10 +9,10 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID
+from .const import CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_METER_SERIAL
 from .coordinator import SewConfigEntry
 
-TO_REDACT = {CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_PASSWORD, CONF_USERNAME}
+TO_REDACT = {CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_METER_SERIAL, CONF_PASSWORD, CONF_USERNAME}
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SewConfigEntry) -> dict[str, Any]:

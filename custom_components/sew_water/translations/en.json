@@ -88,6 +88,7 @@
       "invalid_auth": "The portal rejected the session before setup could finish.",
       "reauth_successful": "Signed in again successfully.",
       "reconfigure_successful": "Signed in again; the new session is stored.",
+      "single_instance_allowed": "South East Water is already set up. Only one account is supported.",
       "unknown": "The portal responded unexpectedly. Check the logs for details.",
       "wrong_account": "The account you signed in to does not match this entry."
     }
@@ -115,7 +116,17 @@
       }
     }
   },
+  "device": {
+    "meter": {
+      "name": "South East Water"
+    }
+  },
   "entity": {
+    "button": {
+      "update_now": {
+        "name": "Update now"
+      }
+    },
     "sensor": {
       "daily_usage": {
         "name": "Daily usage"
@@ -150,6 +161,9 @@
     },
     "import_failed": {
       "message": "Import failed: {error}"
+    },
+    "poll_failed": {
+      "message": "Poll failed: {error}"
     },
     "no_entries": {
       "message": "South East Water is not set up."

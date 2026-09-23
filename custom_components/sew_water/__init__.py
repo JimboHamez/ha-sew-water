@@ -28,7 +28,7 @@ from .sew_client import SewClient
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
 
 IMPORT_FROM_DATE_SCHEMA = vol.Schema({vol.Required(SERVICE_ATTR_START_DATE): cv.date})
 
@@ -44,7 +44,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         if not coordinators:
             raise ServiceValidationError(translation_domain=DOMAIN, translation_key="no_entries")
         for coordinator in coordinators:
-            await coordinator.async_refresh()
+            await coordinator.async_poll_now()
 
     async def _import_from_date(call: ServiceCall) -> None:
         coordinators = _coordinators()

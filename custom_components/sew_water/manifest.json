@@ -12,7 +12,7 @@
   "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/JimboHamez/ha-sew-water/issues",
-  "quality_scale": "platinum",
   "requirements": [],
+  "single_config_entry": true,
   "version": "2.1.0"
 }

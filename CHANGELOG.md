@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **Update now** button on the South East Water device. It polls the portal straight away, like
+  `sew_water.force_import`, without going through *Developer tools → Actions*. It stays pressable
+  after a failed poll so it can be used to retry.
+
+### Changed
+- Minimum Home Assistant is now 2025.12. The retry-after handling for a busy portal needs it; on
+  older versions a throttled poll failed with a `TypeError`. The integration's own icon shows from
+  2026.3.
+- Only one South East Water entry can be added. Every entry wrote the same
+  `sew_water:water_usage_mains` statistic, so a second account corrupted the first one's history.
+- The manifest no longer claims a quality-scale tier. The portal client is bundled rather than
+  published as a separate library, which leaves the Bronze `dependency-transparency` rule open; see
+  the README.
+- The meter serial is now redacted from diagnostics, like the other account identifiers.
+- The device name comes from translations.
+
+### Fixed
+- `sew_water.force_import` now raises an error when the poll fails instead of reporting success.
+
 ## [2.1.0] — 2026-09-18
 
 ### Added

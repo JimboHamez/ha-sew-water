@@ -109,6 +109,15 @@ async def test_force_import_polls_now(
     assert len(fake_client.fetch_ranges) == fetches_before + 1
 
 
+async def test_force_import_reports_portal_failure(
+    hass: HomeAssistant, setup_integration: MockConfigEntry, fake_client: FakeClient
+) -> None:
+    fake_client.fetch_error = SewConnectionError("down")
+    with pytest.raises(HomeAssistantError, match="Poll failed") as excinfo:
+        await hass.services.async_call(DOMAIN, SERVICE_FORCE_IMPORT, {}, blocking=True)
+    assert excinfo.value.translation_key == "poll_failed"
+
+
 async def test_import_from_date_fetches_requested_range(
     hass: HomeAssistant, setup_integration: MockConfigEntry, fake_client: FakeClient
 ) -> None:
@@ -161,7 +170,8 @@ async def test_poll_auth_failure_triggers_reauth(
     hass: HomeAssistant, setup_integration: MockConfigEntry, fake_client: FakeClient
 ) -> None:
     fake_client.fetch_error = SewAuthError("expired")
-    await hass.services.async_call(DOMAIN, SERVICE_FORCE_IMPORT, {}, blocking=True)
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, SERVICE_FORCE_IMPORT, {}, blocking=True)
     await hass.async_block_till_done()
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert len(flows) == 1

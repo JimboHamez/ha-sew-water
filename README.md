@@ -6,7 +6,7 @@
 ![GitHub License](https://img.shields.io/github/license/JimboHamez/ha-sew-water?style=for-the-badge)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/JimboHamez/ha-sew-water?style=for-the-badge)
 ![Maintenance](https://img.shields.io/maintenance/yes/2026?style=for-the-badge)
-[![HA quality scale](https://img.shields.io/badge/HA%20quality%20scale-platinum-E5E4E2?style=for-the-badge)](#home-assistant-quality-scale)
+[![HA quality scale](https://img.shields.io/badge/HA%20quality%20scale-no%20tier%20claimed-lightgrey?style=for-the-badge)](#home-assistant-quality-scale)
 
 [![Tests](https://github.com/JimboHamez/ha-sew-water/actions/workflows/test.yml/badge.svg)](https://github.com/JimboHamez/ha-sew-water/actions/workflows/test.yml)
 [![Validate](https://github.com/JimboHamez/ha-sew-water/actions/workflows/validate.yaml/badge.svg)](https://github.com/JimboHamez/ha-sew-water/actions/workflows/validate.yaml)
@@ -39,7 +39,7 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 - **Poll time is now an option** ([#3](https://github.com/JimboHamez/ha-sew-water/issues/3)). The daily poll was fixed at 02:00, but the portal publishes the previous day's readings later than that on at least some accounts, leaving *Daily usage* a day behind until the next poll. Set the time under ⚙ on the integration entry; the default stays 02:00.
 
-From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and [Platinum](#home-assistant-quality-scale) on the quality scale. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
+From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
 Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.1.0).
 
@@ -181,7 +181,7 @@ The protocol, the statistics rules and every design decision are in [DESIGN_DOCU
 
 ---
 
-## Sensors
+## Entities
 
 All entities sit on one device, **South East Water**.
 
@@ -191,6 +191,10 @@ All entities sit on one device, **South East Water**.
 | `sensor.south_east_water_total_usage` | L | Running total of every day imported (`total_increasing`). |
 | `sensor.south_east_water_last_reading_date` | date | Day the *Daily usage* value belongs to. Diagnostic; **disabled by default** — enable it from the entity's settings if you want it on a card (the same date is the `reading_date` attribute of *Daily usage*). |
 
+| Button | Description |
+|---|---|
+| `button.south_east_water_update_now` | **Update now** — polls the portal straight away, the same as `sew_water.force_import`. It is on the device page and can be added to any dashboard. It stays pressable after a failed poll so you can retry, and shows an error if the poll fails again. |
+
 Account identifiers (billing account, meter record ID, meter serial) are deliberately **not** exposed as entities — they identify your account and would otherwise be kept in the recorder. They live only in the config entry, are redacted from diagnostics, and are written once to the log at debug level on startup if you need to check them.
 
 ---
@@ -199,7 +203,7 @@ Account identifiers (billing account, meter record ID, meter serial) are deliber
 
 | Service | Description |
 |---|---|
-| `sew_water.force_import` | Poll the portal now instead of waiting for the next scheduled poll. |
+| `sew_water.force_import` | Poll the portal now instead of waiting for the next scheduled poll. The **Update now** button does the same from a dashboard. |
 | `sew_water.import_from_date` | Import every day from `start_date` up to yesterday — for example, back to the day your digital meter was installed. |
 
 ```yaml
@@ -270,6 +274,7 @@ actions:
 - **Hourly is the finest resolution.** The portal publishes hourly readings, so that is what the statistic stores; there is no finer data. On the day daylight saving starts (23 hours), the portal's 24th reading is folded into the last hour of that day.
 - **History imported by earlier versions is daily.** Days imported before hourly statistics were introduced have a single row at 11:00; they are converted to hourly rows automatically as they fall inside the 30-day re-import window, or all at once with `sew_water.import_from_date`.
 - **One-time code on every login.** The portal offers no "remember this device". Setup, re-authentication and reconfigure each need a code; the integration keeps the session alive with a small request every 30 minutes so this is rare, but it cannot be avoided when the portal ends the session (for example after a portal release or a password change).
+- **One account per Home Assistant.** A second South East Water entry cannot be added, because every entry would write to the same `sew_water:water_usage_mains` statistic.
 - **One login, one meter.** If a portal login has several billing accounts or meters, only the first one returned by the portal is used. Mains water only — recycled-water meters are not read.
 - **Backfill on first setup is 90 days** unless you give an installation date in the wizard. `sew_water.import_from_date` covers anything else.
 - **Sensor totals versus statistics.** The *Total usage* sensor changes once per poll, so its history attributes the whole day to the minute the poll ran. Use the statistic for the Energy dashboard.
@@ -288,8 +293,8 @@ actions:
 | Setup shows *The code was not accepted* | Wrong or expired code. | Codes are six digits and short-lived. Request a new one by going back a step. |
 | Setup shows *The portal responded unexpectedly* | The portal's pages or responses did not match what the integration expects. | Enable debug logging (below), retry, and open an issue with the log excerpt. It usually means the portal changed. |
 | Repair issue *needs to be set up again* | A config entry from an earlier integration version was found; it holds no portal session and cannot be migrated. | Delete that entry and add the integration again. Existing statistics are kept. |
-| *Daily usage* is `unknown` or the last reading date is several days old | The portal has not published recent days yet, or is returning zeros for them. | Check the portal's *Usage* page for the same days. The next daily poll re-imports the last 30 days automatically; `sew_water.force_import` does it now. If this happens every day, set a later **Poll time** in the options. |
-| Entities are *unavailable* | The last poll failed (portal down, busy or unreachable). | The coordinator logs the cause once and retries — after 15 minutes if the portal reported it was busy, otherwise at the next scheduled poll. Call `sew_water.force_import` to retry immediately. |
+| *Daily usage* is `unknown` or the last reading date is several days old | The portal has not published recent days yet, or is returning zeros for them. | Check the portal's *Usage* page for the same days. The next daily poll re-imports the last 30 days automatically; press **Update now** (or call `sew_water.force_import`) to do it now. If this happens every day, set a later **Poll time** in the options. |
+| Entities are *unavailable* | The last poll failed (portal down, busy or unreachable). | The coordinator logs the cause once and retries — after 15 minutes if the portal reported it was busy, otherwise at the next scheduled poll. Press **Update now** (or call `sew_water.force_import`) to retry immediately. |
 | Energy dashboard shows a big spike on one day | The `Total usage` *sensor* was chosen as the water source instead of the statistic. | Change the water source to `sew_water:water_usage_mains`. |
 | History is missing before a certain date | Only 90 days are imported on first setup unless you gave an installation date. | Call `sew_water.import_from_date` with the date you want to start from. |
 | **South East Water history import did not finish** repair issue | The background import from your installation date failed after its retries. | It runs again on the next reload or restart; or call `sew_water.import_from_date` with the same date to do it now. |
@@ -319,11 +324,11 @@ Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items
 
 | Component | Version |
 |---|---|
-| Home Assistant | 2025.8 or newer |
+| Home Assistant | 2025.12 or newer (2026.3 or newer to show the integration's own icon) |
 | Python | 3.13 (as shipped with Home Assistant) |
 | Runtime dependencies | `aiohttp` (ships with Home Assistant) |
 | Utility | South East Water only (mains water) |
-| Quality scale | Platinum, self-assessed — see [Home Assistant quality scale](#home-assistant-quality-scale) |
+| Quality scale | No tier claimed: the portal client is bundled rather than published as a library — see [Home Assistant quality scale](#home-assistant-quality-scale) |
 
 Credentials are stored in the config entry — Home Assistant's private `.storage`, the same place every integration keeps its secrets. They are never logged and are redacted from diagnostics. Because the portal demands a one-time code on every login, the stored password alone cannot open a new session; it only saves you retyping it during re-authentication.
 
@@ -333,19 +338,22 @@ Credentials are stored in the config entry — Home Assistant's private `.storag
 
 This integration is measured against Home Assistant's [Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/checklist) — the checklist core integrations are held to, covering setup, entity naming, documentation, typing and test coverage. The rule-by-rule record is in [`quality_scale.yaml`](custom_components/sew_water/quality_scale.yaml).
 
-**This is a self-assessment, not an awarded tier.** The quality scale is a programme for integrations that ship inside Home Assistant Core; a custom/HACS integration like this one is not eligible for an official rating. The badge reports our own audit against the published rules, so you can see what has and hasn't been done rather than take "custom integration" on trust.
+**This is a self-assessment, not an awarded tier.** The quality scale is a programme for integrations that ship inside Home Assistant Core; a custom/HACS integration like this one is not eligible for an official rating. We audit against the published rules anyway, so you can see what has and hasn't been done rather than take "custom integration" on trust.
 
-**Bronze — all 17 applicable rules pass.** Setup runs entirely through the UI, `config_flow.py` is fully covered by tests, entities carry unique IDs and take their names from translations, the coordinator lives on `entry.runtime_data`, both actions (`force_import` and `import_from_date`) are registered at startup, and the portal login is exercised before an entry is created and again before setup completes. Three Bronze rules don't apply: `docs-triggers` and `docs-conditions` (this integration provides neither), and `entity-event-setup` (entities read the coordinator and subscribe to nothing else).
+> [!NOTE]
+> **No tier is claimed.** One Bronze rule, `dependency-transparency`, is not met. Home Assistant expects the code that talks to a service to live in a **separate library, published to PyPI** from a public CI pipeline and declared in `manifest.json` `requirements`. Here the portal client is bundled in the integration as [`sew_client.py`](custom_components/sew_water/sew_client.py). Every tier includes Bronze, so with this rule open no tier can be claimed. The same choice leaves the Platinum rule `async-dependency` open; every other applicable rule passes.
+>
+> Bundling the client is deliberate. The rule exists so Home Assistant Core can version a dependency independently of the integration that uses it; this integration ships as one unit through HACS, and the client exists for exactly one portal with no other consumer. Splitting it would add a second repository, a second release cadence and a compatibility surface between them, with nothing a user would notice. The client has no Home Assistant imports and its own test suite, so it can be split out later if that changes.
+
+**Bronze — 16 of 17 applicable rules pass; `dependency-transparency` is open (see above).** Setup runs entirely through the UI, `config_flow.py` is fully covered by tests, entities carry unique IDs and take their names from translations, the coordinator lives on `entry.runtime_data`, both actions (`force_import` and `import_from_date`) are registered at startup, and the portal login is exercised before an entry is created and again before setup completes. Three Bronze rules don't apply: `docs-triggers` and `docs-conditions` (this integration provides neither), and `entity-event-setup` (entities read the coordinator and subscribe to nothing else).
 
 **Silver — all 10 rules pass.** The config entry unloads cleanly, every entity goes *unavailable* when a poll fails and comes back when the next one succeeds, the coordinator logs an outage once rather than every cycle, both actions raise a translated error instead of failing silently, `PARALLEL_UPDATES` is declared, and an expired portal session raises `ConfigEntryAuthFailed` so Home Assistant's standard *Reauthentication required* card asks for a new one-time code. Test coverage sits at 99% against the required 95%, which CI enforces.
 
-**Gold — all 18 applicable rules pass.** The meter is a device, a diagnostics download (credentials, session cookies and account identifiers redacted) is available from the integration page, the wizard can be re-run against an existing entry via **Reconfigure**, entity names, icons and error messages come from translations, the reading-date sensor is a disabled-by-default diagnostic entity, a repair issue is raised for a version 1 entry that cannot be migrated, and the docs carry use cases, examples, troubleshooting and a known-limitations list.
+**Gold — all 18 applicable rules pass.** The meter is a device with a translated name, a diagnostics download (credentials, session cookies and account identifiers, including the meter serial, redacted) is available from the integration page, the wizard can be re-run against an existing entry via **Reconfigure**, entity names, icons and error messages come from translations, the reading-date sensor is a disabled-by-default diagnostic entity, a repair issue is raised for a version 1 entry that cannot be migrated, and the docs carry use cases, examples, troubleshooting and a known-limitations list.
 
-Four Gold rules don't apply, all for the same reason: one config entry is one portal login with one meter. `discovery` and `discovery-update-info` assume something on the local network to find, and this is a cloud service; `dynamic-devices` and `stale-devices` assume devices can appear or disappear after setup, and here the only device is created with the entry and removed with it.
+Four Gold rules don't apply, all for the same reason: only one config entry is allowed and it has one meter. `discovery` and `discovery-update-info` assume something on the local network to find, and this is a cloud service; `dynamic-devices` and `stale-devices` assume devices can appear or disappear after setup, and here the only device is created with the entry and removed with it.
 
-**Platinum — all three rules pass.** `strict-typing`: `mypy --strict` is clean across the package (checked in CI) and a `py.typed` marker ships with it. `async-dependency` and `inject-websession`: the portal client is `aiohttp` throughout with no blocking I/O, and it owns no network resources — the config flow and the coordinator each hand it a session created through Home Assistant's `async_create_clientsession`, with a dedicated cookie jar so the portal's session cookies never mix with other integrations'.
-
-One thing worth stating plainly: those two rules assume the API code lives in a **separate published library** declared in `manifest.json` `requirements`, and here it lives in-component as `sew_client.py`. That split is deliberate. The rule exists so Home Assistant Core can version a dependency independently of the integration that uses it; this integration ships as one unit through HACS, and the client exists for exactly one portal with no other consumer. Splitting it would buy a second repository, a second release cadence and a version-compatibility surface between them, in exchange for nothing a user would notice.
+**Platinum — two of three rules pass; `async-dependency` is open for the same reason as `dependency-transparency`.** `strict-typing`: `mypy --strict` is clean across the package (checked in CI) and a `py.typed` marker ships with it. `inject-websession`: the client owns no network resources — the config flow and the coordinator each hand it a session created through Home Assistant's `async_create_clientsession`, with a dedicated cookie jar so the portal's session cookies never mix with other integrations'. The bundled client is `aiohttp` throughout with no blocking I/O, which is what `async-dependency` is after, but it is not a separate dependency.
 
 ---
 

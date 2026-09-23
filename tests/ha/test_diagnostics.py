@@ -10,7 +10,7 @@ from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
 from custom_components.sew_water.const import CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_METER_SERIAL
 
-from .conftest import METER_SERIAL, FakeClient
+from .conftest import FakeClient
 
 REDACTED = "**REDACTED**"
 
@@ -24,10 +24,8 @@ async def test_diagnostics_redacts_secrets_and_identifiers(
     result = await get_diagnostics_for_config_entry(hass, hass_client, setup_integration)
 
     entry_data = result["entry"]["data"]
-    for key in (CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_PASSWORD, CONF_USERNAME):
+    for key in (CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_METER_SERIAL, CONF_PASSWORD, CONF_USERNAME):
         assert entry_data[key] == REDACTED
-    # The serial is left visible; it appears on the meter itself and is useful when reporting issues.
-    assert entry_data[CONF_METER_SERIAL] == METER_SERIAL
     assert result["entry"]["options"] == {}
 
     coordinator = result["coordinator"]

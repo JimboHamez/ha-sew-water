@@ -1,5 +1,10 @@
 {
   "entity": {
+    "button": {
+      "update_now": {
+        "default": "mdi:cloud-download"
+      }
+    },
     "sensor": {
       "daily_usage": {
         "default": "mdi:water"

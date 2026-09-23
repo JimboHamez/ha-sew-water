@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from homeassistant.const import ATTR_ATTRIBUTION, STATE_UNAVAILABLE, STATE_UNKNOWN, EntityCategory
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.util import dt as dt_util
 import pytest
@@ -28,7 +29,11 @@ async def test_entities_are_created_on_one_device(
     entity_registry: er.EntityRegistry,
     device_registry: dr.DeviceRegistry,
 ) -> None:
-    entries = er.async_entries_for_config_entry(entity_registry, setup_integration.entry_id)
+    entries = [
+        entry
+        for entry in er.async_entries_for_config_entry(entity_registry, setup_integration.entry_id)
+        if entry.domain == "sensor"
+    ]
     assert {entry.entity_id for entry in entries} == {DAILY, TOTAL, LAST_DATE}
     assert {entry.unique_id for entry in entries} == {
         f"{setup_integration.entry_id}_daily_usage",
@@ -128,7 +133,8 @@ async def test_entities_unavailable_after_failed_poll(
     hass: HomeAssistant, setup_integration: MockConfigEntry, fake_client: FakeClient
 ) -> None:
     fake_client.fetch_error = SewConnectionError("down")
-    await hass.services.async_call(DOMAIN, SERVICE_FORCE_IMPORT, {}, blocking=True)
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(DOMAIN, SERVICE_FORCE_IMPORT, {}, blocking=True)
     await hass.async_block_till_done()
     for entity_id in (DAILY, TOTAL, LAST_DATE):
         state = hass.states.get(entity_id)

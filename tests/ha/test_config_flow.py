@@ -260,15 +260,12 @@ async def test_discovery_errors_abort(
     assert result["reason"] == reason
 
 
-async def test_duplicate_account_aborts(
-    hass: HomeAssistant, fake_client: FakeClient, mock_config_entry: MockConfigEntry
-) -> None:
+async def test_second_entry_is_refused(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
+    """Every entry writes the same external statistic, so only one entry is allowed."""
     mock_config_entry.add_to_hass(hass)
-    fake_client.login_result = LoginResult(mfa_required=False, channels=())
-    result = await start_user_flow(hass)
-    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "already_configured"
+    assert result["reason"] == "single_instance_allowed"
 
 
 # ----------------------------------------------------------------------------- reauth
