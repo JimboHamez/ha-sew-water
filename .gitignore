@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 *.egg-info/
 .claude/settings.local.json
+.mcp.json
 
 # Coverage data
 .coverage
