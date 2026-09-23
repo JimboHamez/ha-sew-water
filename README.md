@@ -35,13 +35,19 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.1.0
+## 🆕 What's new in v2.2.0
 
-- **Poll time is now an option** ([#3](https://github.com/JimboHamez/ha-sew-water/issues/3)). The daily poll was fixed at 02:00, but the portal publishes the previous day's readings later than that on at least some accounts, leaving *Daily usage* a day behind until the next poll. Set the time under ⚙ on the integration entry; the default stays 02:00.
+- **Update now button.** Poll the portal from the device page or any dashboard instead of running `sew_water.force_import` from *Developer tools*. It stays pressable after a failed poll, so you can retry.
+- **Errors are reported.** `sew_water.force_import` and the button now show an error when the poll fails, instead of reporting success.
+- **One account per Home Assistant.** A second entry would have overwritten the first one's statistics, so it can no longer be added.
+- **Minimum Home Assistant is now 2025.12.**
+- **No quality-scale tier claimed.** The portal client is bundled rather than published as a library; see [Home Assistant quality scale](#home-assistant-quality-scale).
+
+From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/JimboHamez/ha-sew-water/issues/3)).
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.1.0).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.0).
 
 ---
 
