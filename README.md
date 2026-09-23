@@ -272,6 +272,33 @@ actions:
 
 **Quarterly water budget.** Create a [utility meter](https://www.home-assistant.io/integrations/utility_meter/) helper with source `sensor.south_east_water_total_usage` and a *quarterly* cycle; its value is the litres used so far this quarter and works as a gauge or a threshold for an automation.
 
+**Catch late readings.** The portal publishes each day's readings at unpredictable times, especially on weekends, so the daily poll can run before yesterday is available. This presses **Update now** every three hours during the day until *Daily usage* shows yesterday's date, then stops until the next day. `continue_on_error` keeps a failed poll (portal busy or down) from marking the run as errored; the next time slot retries anyway.
+
+```yaml
+alias: Fetch late water readings
+triggers:
+  - trigger: time
+    at:
+      - "07:00:00"
+      - "10:00:00"
+      - "13:00:00"
+      - "16:00:00"
+      - "19:00:00"
+      - "22:00:00"
+conditions:
+  - condition: template
+    value_template: >-
+      {{ state_attr('sensor.south_east_water_daily_usage', 'reading_date')
+         != (now() - timedelta(days=1)).date() | string }}
+actions:
+  - action: button.press
+    continue_on_error: true
+    target:
+      entity_id: button.south_east_water_update_now
+```
+
+*Daily usage* shows the most recent day with water used, so a day with no use at all (for example while you are away) never matches and the automation presses at every time slot that day. That is at most six extra polls, each fetching the last 30 days in one batched request.
+
 ---
 
 ## Known limitations
