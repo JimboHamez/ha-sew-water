@@ -13,8 +13,9 @@ login, multi-factor authentication and usage-data flow is plain HTTP, so no brow
    carried into the next post.
 5. ``GET /s/`` - every HTML page load issues a fresh Aura CSRF token in a ``__Host-ERIC_PROD-*``
    cookie; the page names that cookie in its ``eikoocnekot`` bootstrap setting.
-6. ``POST /s/sfsites/aura`` with ``ApexActionController.execute`` actions to discover the billing
-   account and meter record IDs and to fetch usage. Many single-day usage actions batch into one POST.
+6. ``POST /s/sfsites/aura`` with ``cm_AccountBillingUsageAURA`` actions to discover the billing account
+   and meter record IDs, then ``ApexActionController.execute`` actions to fetch usage. Many single-day
+   usage actions batch into one POST.
 
 This module has no Home Assistant imports so it can be unit-tested offline with ``aioresponses``.
 """
@@ -39,10 +40,11 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_BASE_URL = "https://my.southeastwater.com.au"
 
 APEX_PORTAL_CLASSNAME = "cm_AccountBillingUsageAURA"
-# Field lists for the discovery queries. The portal asks for far more; these are the ones we use.
-BILLING_ACCOUNT_FIELDS = "Id, Name, Status__c, Property__c, Property__r.Digital_Meter__c"
-METER_FIELDS = "Id, Name, Is_Digital__c, Digital_Meter__c, Property__c"
-METER_DIGITAL_FILTER = "(Is_Digital__c = true OR Digital_Meter__c = true)"
+# Discovery actions. The portal dropped the generic ``retrieveBillingAccounts`` / ``retrieveSObject``
+# actions in September 2026 (the server now silently omits them from the response); these replaced them.
+APEX_ACCOUNTS_METHOD = "getBillingAccountsForUser"
+APEX_METERS_METHOD = "getMetersByPropertyIds"
+ACCOUNT_STATUS_ACTIVE = "Active"
 APEX_USAGE_CLASSNAME = "MysewUsageBillingGraphController"
 APEX_USAGE_METHOD = "getUsageData"
 AURA_APP_COMMUNITY = "siteforce:communityApp"
@@ -751,9 +753,10 @@ class SewClient:
     async def async_discover_ids(self) -> AccountIds:
         """Find the billing account and meter record IDs for the logged-in customer.
 
-        Mirrors the portal's own start-up calls: ``retrieveBillingAccounts`` gives the billing account
-        and its property; ``retrieveSObject`` on ``Meter_Details__c`` filtered by that property and the
-        digital-meter flags gives the meter. The first account and first digital meter are used.
+        Mirrors the portal's own start-up calls: ``getBillingAccountsForUser`` gives the billing
+        accounts and their properties; ``getMetersByPropertyIds`` gives the property's meters, of which
+        only digital ones are kept. The first active account (or the first account, if none is marked
+        active) and its first digital meter are used.
 
         Returns:
             The IDs required by ``async_fetch_usage``.
@@ -763,32 +766,30 @@ class SewClient:
             SewProtocolError: If the IDs cannot be found.
         """
         context, token = await self._ensure_home()
-        accounts_action = {
-            "callingDescriptor": "markup://c:PortalDataHub",
-            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION$retrieveBillingAccounts",
-            "params": {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS},
-        }
-        (result,) = await self._aura([accounts_action], context, token, HOME_PATH)
-        accounts = _records(self._action_value(result))
-        account = next((a for a in accounts if isinstance(a.get("Id"), str)), None)
+        (result,) = await self._aura([self._portal_action(APEX_ACCOUNTS_METHOD, {})], context, token, HOME_PATH)
+        accounts = [a for a in _records(self._action_value(result)) if isinstance(a.get("Id"), str)]
+        account = next((a for a in accounts if a.get("Status__c") == ACCOUNT_STATUS_ACTIVE), None)
+        if account is None:
+            account = next(iter(accounts), None)
         if account is None:
             raise SewProtocolError("No billing account found for this login")
         billing_account_id = str(account["Id"])
         property_id = account.get("Property__c")
         if not isinstance(property_id, str) or not property_id:
             raise SewProtocolError("Billing account has no property")
-        meter_action = {
-            "callingDescriptor": "markup://c:PortalDataHub",
-            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION$retrieveSObject",
-            "params": {
-                "fieldsToRetrieve": METER_FIELDS,
-                "objectToReturn": "Meter_Details__c",
-                "whereClause": f"Property__c IN ('{property_id}') AND {METER_DIGITAL_FILTER}",
-            },
-        }
+        meter_action = self._portal_action(APEX_METERS_METHOD, {"propertyIds": [property_id]})
         (result,) = await self._aura([meter_action], context, token, HOME_PATH)
         meters = _records(self._action_value(result))
-        meter = next((m for m in meters if isinstance(m.get("Id"), str)), None)
+        meter = next(
+            (
+                m
+                for m in meters
+                if isinstance(m.get("Id"), str)
+                and m.get("Property__c", property_id) == property_id
+                and (m.get("Is_Digital__c") is True or m.get("Digital_Meter__c") is True)
+            ),
+            None,
+        )
         if meter is None:
             raise SewProtocolError("No digital meter found for the property")
         serial = meter.get("Name")
@@ -827,6 +828,15 @@ class SewClient:
             for day, result in zip(chunk, results, strict=True):
                 usage.append(self._parse_usage(day, self._action_value(result)))
         return usage
+
+    @staticmethod
+    def _portal_action(method: str, params: dict[str, Any]) -> dict[str, Any]:
+        """Build an Aura action for a method of the portal's account controller."""
+        return {
+            "callingDescriptor": "markup://c:PortalDataHub",
+            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION${method}",
+            "params": params,
+        }
 
     @staticmethod
     def _usage_action(ids: AccountIds, day: date) -> dict[str, Any]:

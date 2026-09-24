@@ -16,8 +16,6 @@ from yarl import URL
 
 import sew_client
 from sew_client import (  # loaded from file by conftest.py, without importing the HA package
-    BILLING_ACCOUNT_FIELDS,
-    METER_FIELDS,
     USAGE_BATCH_SIZE,
     AccountIds,
     SewAuthError,
@@ -342,7 +340,7 @@ PROPERTY_ID = "a07900000000PROPAAE"
 
 
 def account_record(property_id: str | None = PROPERTY_ID) -> dict[str, Any]:
-    """One ``Billing_Account__c`` record as ``retrieveBillingAccounts`` returns it."""
+    """One ``Billing_Account__c`` record as ``getBillingAccountsForUser`` returns it."""
     record: dict[str, Any] = {
         "attributes": {
             "type": "Billing_Account__c",
@@ -359,7 +357,7 @@ def account_record(property_id: str | None = PROPERTY_ID) -> dict[str, Any]:
 
 
 def meter_record() -> dict[str, Any]:
-    """One ``Meter_Details__c`` record as ``retrieveSObject`` returns it."""
+    """One ``Meter_Details__c`` record as ``getMetersByPropertyIds`` returns it."""
     return {
         "attributes": {"type": "Meter_Details__c", "url": f"/services/data/v67.0/sobjects/Meter_Details__c/{METER_ID}"},
         "Digital_Meter__c": False,
@@ -385,17 +383,36 @@ async def test_discover_ids_uses_home_token_and_finds_records(client: SewClient,
     assert context["fwuid"] == FWUID_HOME
     assert context["loaded"] == {"APPLICATION@markup://siteforce:communityApp": HASH_HOME}
     (action,) = aura_message(first)["actions"]
-    assert action["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$retrieveBillingAccounts"
-    assert action["params"] == {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS}
+    assert action["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$getBillingAccountsForUser"
+    assert action["params"] == {}
 
     second = posted_form(mocked, "/s/sfsites/aura", index=1)
     (action,) = aura_message(second)["actions"]
-    assert action["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$retrieveSObject"
-    assert action["params"]["objectToReturn"] == "Meter_Details__c"
-    assert action["params"]["fieldsToRetrieve"] == METER_FIELDS
-    assert action["params"]["whereClause"] == (
-        f"Property__c IN ('{PROPERTY_ID}') AND (Is_Digital__c = true OR Digital_Meter__c = true)"
-    )
+    assert action["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$getMetersByPropertyIds"
+    assert action["params"] == {"propertyIds": [PROPERTY_ID]}
+
+
+async def test_discover_ids_prefers_an_active_account(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    closed = account_record(property_id="a07900000000OLDPAAE")
+    closed["Id"] = "a0800000000CLOSEDAAE"
+    closed["Status__c"] = "Closed"
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([closed, account_record()])))
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([meter_record()])))
+    ids = await client.async_discover_ids()
+    assert ids.billing_account_id == BILLING_ACCOUNT_ID
+    (action,) = aura_message(posted_form(mocked, "/s/sfsites/aura", index=1))["actions"]
+    assert action["params"] == {"propertyIds": [PROPERTY_ID]}
+
+
+async def test_discover_ids_skips_meters_that_are_not_digital(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mechanical = meter_record()
+    mechanical.update(Id="a1K00000000MECHAAE", Is_Digital__c=False, Digital_Meter__c=False)
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([account_record()])))
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([mechanical, meter_record()])))
+    ids = await client.async_discover_ids()
+    assert ids.meter_id == METER_ID
 
 
 async def test_discover_ids_accepts_plain_lists_and_missing_serial(client: SewClient, mocked: aioresponses) -> None:
