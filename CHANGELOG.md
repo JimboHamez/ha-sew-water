@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- Setup failed at the last step with *The portal responded unexpectedly* (log: `Aura response has an
+  unexpected number of actions`). The portal stopped answering the generic `retrieveBillingAccounts`
+  and `retrieveSObject` actions — the response simply leaves them out. Discovery now uses the
+  portal's `getBillingAccountsForUser` and `getMetersByPropertyIds` instead, prefers an active billing
+  account, and keeps only digital meters. Usage fetching was not affected.
+
 ## [2.2.0] — 2026-09-23
 
 ### Added
