@@ -825,16 +825,29 @@ class SewClient:
             for m in _records(value.get("meters"))
             if isinstance(m.get("Id"), str) and m.get("Is_Digital__c") is True and m.get("Property__c")
         ]
-        for account in accounts:
-            meter = next((m for m in meters if m["Property__c"] == account.get("Property__c")), None)
-            if meter is not None:
-                serial = meter.get("Name")
-                return AccountIds(
-                    billing_account_id=str(account["Id"]),
-                    meter_id=str(meter["Id"]),
-                    meter_serial=str(serial) if serial else None,
-                )
-        raise SewProtocolError(f"No digital meter found for the {len(accounts)} billing account(s) on this login")
+        # Every (account, digital meter) pairing, in the portal's account order and then its meter order.
+        candidates = [(a, m) for a in accounts for m in meters if m["Property__c"] == a.get("Property__c")]
+        if not candidates:
+            raise SewProtocolError(f"No digital meter found for the {len(accounts)} billing account(s) on this login")
+        account, meter = candidates[0]
+        if len(candidates) > 1:
+            # Identifiers stay out of the info line; the debug line lists them so the choice can be checked.
+            _LOGGER.info(
+                "Found %d digital meters across %d billing account(s); using the first the portal lists",
+                len(candidates),
+                len({a["Id"] for a, _ in candidates}),
+            )
+            _LOGGER.debug(
+                "Digital meter serials in portal order: %s; using %s",
+                [m.get("Name") for _, m in candidates],
+                meter.get("Name"),
+            )
+        serial = meter.get("Name")
+        return AccountIds(
+            billing_account_id=str(account["Id"]),
+            meter_id=str(meter["Id"]),
+            meter_serial=str(serial) if serial else None,
+        )
 
     @staticmethod
     def _apex_action(classname: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

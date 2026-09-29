@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- When a login has more than one digital meter, setup logs how many it found and that it used the
+  first one the portal lists. The meter serials are logged at debug level only, so they can be checked
+  without showing up in normal logs. Which meter is picked has not changed.
+
 ## [2.2.1] — 2026-09-29
 
 ### Fixed

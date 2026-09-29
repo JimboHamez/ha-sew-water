@@ -403,8 +403,41 @@ async def test_discover_ids_picks_the_account_whose_property_has_a_digital_meter
     accounts = [account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID), account_record()]
     meters = [meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, digital=False, serial="12345678"), meter_record()]
     mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
-    ids = await client.async_discover_ids()
+    with patch.object(sew_client._LOGGER, "info") as info:
+        ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
+    # Only one digital meter, so there was no choice to report.
+    info.assert_not_called()
+
+
+async def test_discover_ids_with_two_digital_meters_on_one_property_uses_the_first(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    mock_home(mocked)
+    meters = [meter_record(), meter_record(OTHER_METER_ID, serial="SAHL999999")]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
+    with patch.object(sew_client._LOGGER, "info") as info, patch.object(sew_client._LOGGER, "debug") as debug:
+        ids = await client.async_discover_ids()
+    assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
+    (info_line,) = debug_lines(info)
+    assert info_line == "Found 2 digital meters across 1 billing account(s); using the first the portal lists"
+    # Serials are identifiers, so they appear only at debug level.
+    assert METER_SERIAL not in info_line and "SAHL999999" not in info_line
+    assert f"['{METER_SERIAL}', 'SAHL999999']; using {METER_SERIAL}" in "\n".join(debug_lines(debug))
+
+
+async def test_discover_ids_with_a_digital_meter_on_each_account_uses_the_first_account(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    """The first account wins with its own meter, even when the portal lists that meter second."""
+    mock_home(mocked)
+    accounts = [account_record(), account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID)]
+    meters = [meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, serial="SAHL999999"), meter_record()]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    with patch.object(sew_client._LOGGER, "info") as info:
+        ids = await client.async_discover_ids()
+    assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
+    assert debug_lines(info) == ["Found 2 digital meters across 2 billing account(s); using the first the portal lists"]
 
 
 async def test_discover_ids_accepts_json_strings_and_missing_serial(client: SewClient, mocked: aioresponses) -> None:
