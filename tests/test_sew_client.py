@@ -16,8 +16,6 @@ from yarl import URL
 
 import sew_client
 from sew_client import (  # loaded from file by conftest.py, without importing the HA package
-    BILLING_ACCOUNT_FIELDS,
-    METER_FIELDS,
     USAGE_BATCH_SIZE,
     AccountIds,
     SewAuthError,
@@ -339,115 +337,173 @@ async def test_cookie_export_import_round_trip(session: aiohttp.ClientSession, c
 
 
 PROPERTY_ID = "a07900000000PROPAAE"
+OTHER_PROPERTY_ID = "a07900000000OTHRAAE"
+OTHER_ACCOUNT_ID = "a0890000008OTHRAAA"
+OTHER_METER_ID = "a1K90000000OTHREAC"
 
 
-def account_record(property_id: str | None = PROPERTY_ID) -> dict[str, Any]:
-    """One ``Billing_Account__c`` record as ``retrieveBillingAccounts`` returns it."""
+def account_record(account_id: str = BILLING_ACCOUNT_ID, property_id: str | None = PROPERTY_ID) -> dict[str, Any]:
+    """One billing account as ``getBillingAccountsAndMetersForUser`` returns it."""
     record: dict[str, Any] = {
-        "attributes": {
-            "type": "Billing_Account__c",
-            "url": f"/services/data/v67.0/sobjects/Billing_Account__c/{BILLING_ACCOUNT_ID}",
-        },
-        "Id": BILLING_ACCOUNT_ID,
-        "Name": "1234567",
-        "Status__c": "Active",
+        "Account_Opened__c": "2001-01-01",
+        "HiAF_Account_Number_Check_Digit__c": "12345678",
+        "Id": account_id,
+        "Property_Address__c": "1 EXAMPLE STREET<br>EXAMPLEVILLE VIC 3000",
+        "Role__c": "Owner Occupier",
     }
     if property_id is not None:
         record["Property__c"] = property_id
-        record["Property__r"] = {"Id": property_id, "Digital_Meter__c": True}
     return record
 
 
-def meter_record() -> dict[str, Any]:
-    """One ``Meter_Details__c`` record as ``retrieveSObject`` returns it."""
+def meter_record(
+    meter_id: str = METER_ID, property_id: str = PROPERTY_ID, digital: bool = True, serial: str | None = METER_SERIAL
+) -> dict[str, Any]:
+    """One meter as ``getBillingAccountsAndMetersForUser`` returns it."""
+    return {"Id": meter_id, "Is_Digital__c": digital, "Name": serial, "Property__c": property_id}
+
+
+def discovery_value(accounts: Any, meters: Any) -> dict[str, Any]:
+    """The ``getBillingAccountsAndMetersForUser`` value as ``ApexActionController`` wraps it."""
     return {
-        "attributes": {"type": "Meter_Details__c", "url": f"/services/data/v67.0/sobjects/Meter_Details__c/{METER_ID}"},
-        "Digital_Meter__c": False,
-        "Is_Digital__c": True,
-        "Property__c": PROPERTY_ID,
-        "Id": METER_ID,
-        "Name": METER_SERIAL,
+        "cacheable": False,
+        "returnValue": {"baSettings": [], "billingAccounts": accounts, "meters": meters},
     }
 
 
-async def test_discover_ids_uses_home_token_and_finds_records(client: SewClient, mocked: aioresponses) -> None:
+async def test_discover_ids_uses_home_token_and_the_usage_page_call(client: SewClient, mocked: aioresponses) -> None:
     mock_home(mocked)
-    # Apex serialises both record lists to a JSON string inside the Aura return value.
-    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([account_record()])))
-    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([meter_record()])))
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], [meter_record()])))
     ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
 
-    first = posted_form(mocked, "/s/sfsites/aura", index=0)
-    assert first["aura.token"] == AURA_TOKEN
-    context = json.loads(first["aura.context"])
+    form = posted_form(mocked, "/s/sfsites/aura")
+    assert form["aura.token"] == AURA_TOKEN
+    context = json.loads(form["aura.context"])
     assert context["app"] == "siteforce:communityApp"
     assert context["fwuid"] == FWUID_HOME
     assert context["loaded"] == {"APPLICATION@markup://siteforce:communityApp": HASH_HOME}
-    (action,) = aura_message(first)["actions"]
-    assert action["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$retrieveBillingAccounts"
-    assert action["params"] == {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS}
-
-    second = posted_form(mocked, "/s/sfsites/aura", index=1)
-    (action,) = aura_message(second)["actions"]
-    assert action["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$retrieveSObject"
-    assert action["params"]["objectToReturn"] == "Meter_Details__c"
-    assert action["params"]["fieldsToRetrieve"] == METER_FIELDS
-    assert action["params"]["whereClause"] == (
-        f"Property__c IN ('{PROPERTY_ID}') AND (Is_Digital__c = true OR Digital_Meter__c = true)"
-    )
+    (action,) = aura_message(form)["actions"]
+    assert action["descriptor"] == "aura://ApexActionController/ACTION$execute"
+    # The portal sends this call without a "params" key.
+    assert action["params"] == {
+        "cacheable": False,
+        "classname": "MysewUsageBillingGraphController",
+        "isContinuation": False,
+        "method": "getBillingAccountsAndMetersForUser",
+        "namespace": "",
+    }
 
 
-async def test_discover_ids_accepts_plain_lists_and_missing_serial(client: SewClient, mocked: aioresponses) -> None:
+async def test_discover_ids_picks_the_account_whose_property_has_a_digital_meter(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    """A login can hold several accounts; the first one may be at a property with only a mechanical meter."""
     mock_home(mocked)
-    meter = meter_record()
-    meter["Name"] = None
-    mocked.post(AURA_URL, status=200, payload=aura_envelope([account_record()]))
-    mocked.post(AURA_URL, status=200, payload=aura_envelope({"records": [meter]}))
+    accounts = [account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID), account_record()]
+    meters = [meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, digital=False, serial="12345678"), meter_record()]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    ids = await client.async_discover_ids()
+    assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
+
+
+async def test_discover_ids_accepts_json_strings_and_missing_serial(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    value = {
+        "billingAccounts": json.dumps([account_record()]),
+        "meters": json.dumps([meter_record(serial=None)]),
+    }
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps(value)))
     ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=None)
 
 
-async def test_discover_ids_without_property_is_protocol_error(client: SewClient, mocked: aioresponses) -> None:
+async def test_discover_ids_without_accounts_is_protocol_error(client: SewClient, mocked: aioresponses) -> None:
     mock_home(mocked)
-    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([account_record(property_id=None)])))
-    with pytest.raises(SewProtocolError, match="no property"):
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([], [meter_record()])))
+    with pytest.raises(SewProtocolError, match="No billing account"):
         await client.async_discover_ids()
 
 
-def dropped_envelope() -> dict[str, Any]:
-    """The envelope Aura sends when it silently drops an ``apex://`` action (issue #5)."""
-    return {"actions": [], "context": {"mode": "PROD", "fwuid": FWUID_HOME}, "perfSummary": {}}
+@pytest.mark.parametrize(
+    "meters",
+    [
+        [],
+        [meter_record(digital=False)],
+        [meter_record(property_id=OTHER_PROPERTY_ID)],
+    ],
+    ids=["no-meters", "mechanical-only", "other-property"],
+)
+async def test_discover_ids_without_matching_digital_meter_is_protocol_error(
+    client: SewClient, mocked: aioresponses, meters: list[dict[str, Any]]
+) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
+    with pytest.raises(SewProtocolError, match="No digital meter found for the 1 billing account"):
+        await client.async_discover_ids()
 
 
-async def test_discover_ids_retries_dropped_action_through_apex_controller(
+async def test_discover_ids_without_property_on_account_is_protocol_error(
     client: SewClient, mocked: aioresponses
 ) -> None:
     mock_home(mocked)
-    mocked.post(AURA_URL, status=200, payload=dropped_envelope())
-    mocked.post(AURA_URL, status=200, payload=aura_envelope({"returnValue": json.dumps([account_record()])}))
-    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([meter_record()])))
-    with patch.object(sew_client._LOGGER, "debug") as debug:
-        ids = await client.async_discover_ids()
-    assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
-    assert any("actions=0 expected=1" in line for line in debug_lines(debug))
-
-    (retry,) = aura_message(posted_form(mocked, "/s/sfsites/aura", index=1))["actions"]
-    assert retry["descriptor"] == "aura://ApexActionController/ACTION$execute"
-    assert retry["params"]["classname"] == "cm_AccountBillingUsageAURA"
-    assert retry["params"]["method"] == "retrieveBillingAccounts"
-    assert retry["params"]["params"] == {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS}
-    (meter,) = aura_message(posted_form(mocked, "/s/sfsites/aura", index=2))["actions"]
-    assert meter["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$retrieveSObject"
+    payload = aura_envelope(discovery_value([account_record(property_id=None)], [meter_record()]))
+    mocked.post(AURA_URL, status=200, payload=payload)
+    with pytest.raises(SewProtocolError, match="No digital meter"):
+        await client.async_discover_ids()
 
 
-async def test_discover_ids_reports_why_the_retry_was_refused(client: SewClient, mocked: aioresponses) -> None:
+@pytest.mark.parametrize("value", ["not json at all", None, [1, 2]], ids=["bad-string", "null", "list"])
+async def test_discover_ids_with_unexpected_value_is_protocol_error(
+    client: SewClient, mocked: aioresponses, value: Any
+) -> None:
     mock_home(mocked)
-    mocked.post(AURA_URL, status=200, payload=dropped_envelope())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope({"cacheable": False, "returnValue": value}))
+    with pytest.raises(SewProtocolError, match="Unexpected getBillingAccountsAndMetersForUser response"):
+        await client.async_discover_ids()
+
+
+async def test_discover_ids_refused_by_the_portal_reports_its_reason(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
     refused = aura_envelope({"cacheable": False}, state="ERROR")
     refused["actions"][0]["error"] = [{"message": "You do not have access to the Apex class named 'X'."}]
     mocked.post(AURA_URL, status=200, payload=refused)
     with pytest.raises(SewProtocolError, match="do not have access"):
+        await client.async_discover_ids()
+
+
+async def test_dropped_action_is_logged_and_protocol_error(client: SewClient, mocked: aioresponses) -> None:
+    """Aura drops an action it cannot run with an empty action list and no reason (issue #5)."""
+    mock_home(mocked)
+    dropped = {"actions": [], "context": {"mode": "PROD", "app": "siteforce:communityApp"}, "perfSummary": {}}
+    mocked.post(AURA_URL, status=200, payload=dropped)
+    with patch.object(sew_client._LOGGER, "debug") as debug, pytest.raises(SewProtocolError, match="no action results"):
+        await client.async_discover_ids()
+    assert any("actions=0 expected=1 app=siteforce:communityApp" in line for line in debug_lines(debug))
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ('[{"Id": "x"}]', [{"Id": "x"}]),
+        ("not json", []),
+        ({"records": [{"Id": "x"}, "junk"]}, [{"Id": "x"}]),
+        ({"Id": "x"}, [{"Id": "x"}]),
+        (5, []),
+        (None, []),
+    ],
+    ids=["json-string", "bad-string", "records-dict", "single-dict", "number", "none"],
+)
+def test_records_normalises_apex_values(value: Any, expected: list[dict[str, Any]]) -> None:
+    assert sew_client._records(value) == expected
+
+
+async def test_aura_error_body_with_malformed_message_is_protocol_error(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, body="*/{not json}/*ERROR*/")
+    with pytest.raises(SewProtocolError, match="Aura error: no message"):
         await client.async_discover_ids()
 
 
@@ -473,22 +529,6 @@ async def test_aura_non_json_body_is_logged_and_protocol_error(client: SewClient
     lines = debug_lines(debug)
     assert any("maintenance" in line for line in lines)
     assert not any("SECRET" in line for line in lines)
-
-
-async def test_discover_ids_with_unparseable_accounts_is_protocol_error(
-    client: SewClient, mocked: aioresponses
-) -> None:
-    mock_home(mocked)
-    mocked.post(AURA_URL, status=200, payload=aura_envelope("not json at all"))
-    with pytest.raises(SewProtocolError, match="No billing account"):
-        await client.async_discover_ids()
-
-
-async def test_discover_ids_without_accounts_is_protocol_error(client: SewClient, mocked: aioresponses) -> None:
-    mock_home(mocked)
-    mocked.post(AURA_URL, status=200, payload=aura_envelope("[]"))
-    with pytest.raises(SewProtocolError, match="No billing account"):
-        await client.async_discover_ids()
 
 
 async def test_discover_ids_when_not_logged_in_is_auth_error(client: SewClient, mocked: aioresponses) -> None:
@@ -807,14 +847,6 @@ async def test_import_cookies_restores_flags_and_domain_cookies(
     assert exported["sid"]["secure"] is True
     assert exported["sid"]["httponly"] is True
     assert exported["sid"]["expires"]
-
-
-async def test_discover_ids_without_meter_is_protocol_error(client: SewClient, mocked: aioresponses) -> None:
-    mock_home(mocked)
-    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([account_record()])))
-    mocked.post(AURA_URL, status=200, payload=aura_envelope("[]"))
-    with pytest.raises(SewProtocolError, match="No digital meter"):
-        await client.async_discover_ids()
 
 
 async def test_fetch_usage_accepts_single_object_return_value(client: SewClient, mocked: aioresponses) -> None:

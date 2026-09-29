@@ -3,6 +3,23 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- Setup, Reconfigure and re-authentication failed for every account after the one-time code with
+  *The portal responded unexpectedly* ([#5](https://github.com/JimboHamez/ha-sew-water/issues/5)).
+  South East Water removed the portal call the integration used to find the billing account, and the
+  portal now ignores it. Discovery now uses the call the portal's own usage page makes,
+  `getBillingAccountsAndMetersForUser`, which returns the accounts and meters in one request.
+  Existing installs kept polling throughout, because polling does not use this call.
+- A login with several billing accounts now gets the account whose property has the digital meter.
+  Before, the first account was always used, even when its property had only a mechanical meter.
+
+### Changed
+- The 2.2.1b1 fallback, which retried the old call through `ApexActionController`, is gone. The
+  portal refuses that too ("No apex action available"). Its debug logging and error-message
+  improvements stay.
+
 ## [2.2.1b1] — 2026-09-29
 
 Beta for [#5](https://github.com/JimboHamez/ha-sew-water/issues/5): setup failing after the one-time

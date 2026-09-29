@@ -38,13 +38,11 @@ _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_BASE_URL = "https://my.southeastwater.com.au"
 
-APEX_PORTAL_CLASSNAME = "cm_AccountBillingUsageAURA"
 # Field lists for the discovery queries. The portal asks for far more; these are the ones we use.
-BILLING_ACCOUNT_FIELDS = "Id, Name, Status__c, Property__c, Property__r.Digital_Meter__c"
-METER_FIELDS = "Id, Name, Is_Digital__c, Digital_Meter__c, Property__c"
-METER_DIGITAL_FILTER = "(Is_Digital__c = true OR Digital_Meter__c = true)"
 APEX_USAGE_CLASSNAME = "MysewUsageBillingGraphController"
 APEX_USAGE_METHOD = "getUsageData"
+# The usage page's own discovery call: billing accounts and meters for the logged-in user in one response.
+APEX_DISCOVERY_METHOD = "getBillingAccountsAndMetersForUser"
 AURA_APP_COMMUNITY = "siteforce:communityApp"
 AURA_APP_LOGIN = "siteforce:loginApp2"
 AURA_PATH = "/s/sfsites/aura"
@@ -113,14 +111,6 @@ class SewAuthError(SewError):
 
 class SewProtocolError(SewError):
     """The portal responded with something the client does not understand."""
-
-
-class SewActionDroppedError(SewProtocolError):
-    """The portal answered with no action results and no error.
-
-    Aura silently drops an ``apex://`` action when the class or method does not exist or the session
-    may not call it, so the response gives no reason.
-    """
 
 
 class SewLoginUnexplainedError(SewProtocolError):
@@ -330,6 +320,13 @@ def _retry_after_seconds(value: str | None) -> float | None:
         return None
 
 
+def _unwrap(value: Any) -> Any:
+    """Return the Apex result inside an ``ApexActionController`` value, which wraps it one level deeper."""
+    if isinstance(value, dict) and "returnValue" in value:
+        return value["returnValue"]
+    return value
+
+
 def _records(value: Any) -> list[dict[str, Any]]:
     """Return the record list from an Apex return value, which arrives JSON-encoded as a string."""
     if isinstance(value, str):
@@ -504,7 +501,8 @@ class SewClient:
                 _redact({k: v for k, v in envelope.items() if k != "context"}),
             )
             if results == []:
-                raise SewActionDroppedError("Aura response has no action results and no error")
+                # Aura drops an apex:// action it cannot run (unknown method, no access) without a reason.
+                raise SewProtocolError("Aura response has no action results and no error")
             raise SewProtocolError("Aura response has an unexpected number of actions")
         return cast(dict[str, Any], envelope)
 
@@ -797,9 +795,9 @@ class SewClient:
     async def async_discover_ids(self) -> AccountIds:
         """Find the billing account and meter record IDs for the logged-in customer.
 
-        Mirrors the portal's own start-up calls: ``retrieveBillingAccounts`` gives the billing account
-        and its property; ``retrieveSObject`` on ``Meter_Details__c`` filtered by that property and the
-        digital-meter flags gives the meter. The first account and first digital meter are used.
+        Mirrors the usage page's own start-up call, ``getBillingAccountsAndMetersForUser``, which returns
+        the user's billing accounts and the meters on their properties. A login can hold several
+        accounts; the first account whose property has a digital meter is used, with that meter.
 
         Returns:
             The IDs required by ``async_fetch_usage``.
@@ -809,72 +807,52 @@ class SewClient:
             SewProtocolError: If the IDs cannot be found.
         """
         context, token = await self._ensure_home()
-        accounts = await self._portal_records(
-            "retrieveBillingAccounts", {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS}, context, token
-        )
-        account = next((a for a in accounts if isinstance(a.get("Id"), str)), None)
-        if account is None:
+        action = self._apex_action(APEX_USAGE_CLASSNAME, APEX_DISCOVERY_METHOD)
+        (result,) = await self._aura([action], context, token, HOME_PATH)
+        value = _unwrap(self._action_value(result))
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except ValueError:
+                value = None
+        if not isinstance(value, dict):
+            raise SewProtocolError(f"Unexpected {APEX_DISCOVERY_METHOD} response: {type(value).__name__}")
+        accounts = [a for a in _records(value.get("billingAccounts")) if isinstance(a.get("Id"), str)]
+        if not accounts:
             raise SewProtocolError("No billing account found for this login")
-        billing_account_id = str(account["Id"])
-        property_id = account.get("Property__c")
-        if not isinstance(property_id, str) or not property_id:
-            raise SewProtocolError("Billing account has no property")
-        meter_params = {
-            "fieldsToRetrieve": METER_FIELDS,
-            "objectToReturn": "Meter_Details__c",
-            "whereClause": f"Property__c IN ('{property_id}') AND {METER_DIGITAL_FILTER}",
+        meters = [
+            m
+            for m in _records(value.get("meters"))
+            if isinstance(m.get("Id"), str) and m.get("Is_Digital__c") is True and m.get("Property__c")
+        ]
+        for account in accounts:
+            meter = next((m for m in meters if m["Property__c"] == account.get("Property__c")), None)
+            if meter is not None:
+                serial = meter.get("Name")
+                return AccountIds(
+                    billing_account_id=str(account["Id"]),
+                    meter_id=str(meter["Id"]),
+                    meter_serial=str(serial) if serial else None,
+                )
+        raise SewProtocolError(f"No digital meter found for the {len(accounts)} billing account(s) on this login")
+
+    @staticmethod
+    def _apex_action(classname: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Build an ``ApexActionController`` action the way the portal's Lightning components send it."""
+        action_params: dict[str, Any] = {
+            "cacheable": False,
+            "classname": classname,
+            "isContinuation": False,
+            "method": method,
+            "namespace": "",
         }
-        meters = await self._portal_records("retrieveSObject", meter_params, context, token)
-        meter = next((m for m in meters if isinstance(m.get("Id"), str)), None)
-        if meter is None:
-            raise SewProtocolError("No digital meter found for the property")
-        serial = meter.get("Name")
-        return AccountIds(
-            billing_account_id=billing_account_id,
-            meter_id=str(meter["Id"]),
-            meter_serial=str(serial) if serial else None,
-        )
-
-    async def _portal_records(
-        self, method: str, params: dict[str, Any], context: AuraContext, token: str
-    ) -> list[dict[str, Any]]:
-        """Call a ``cm_AccountBillingUsageAURA`` method and return the records it serialised.
-
-        The portal's own page calls these as ``apex://`` actions. When the portal drops that action without
-        a reason, the same method is called once more through ``ApexActionController``, which either
-        succeeds or says why it refused.
-
-        Raises:
-            SewProtocolError: If both forms fail.
-        """
-        action = {
-            "callingDescriptor": "markup://c:PortalDataHub",
-            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION${method}",
-            "params": params,
-        }
-        try:
-            (result,) = await self._aura([action], context, token, HOME_PATH)
-            return _records(self._action_value(result))
-        except SewActionDroppedError:
-            _LOGGER.debug("Portal dropped %s; retrying through ApexActionController", method)
-        action = {
+        if params is not None:
+            action_params["params"] = params
+        return {
             "callingDescriptor": "UNKNOWN",
             "descriptor": "aura://ApexActionController/ACTION$execute",
-            "params": {
-                "cacheable": False,
-                "classname": APEX_PORTAL_CLASSNAME,
-                "isContinuation": False,
-                "method": method,
-                "namespace": "",
-                "params": params,
-            },
+            "params": action_params,
         }
-        (result,) = await self._aura([action], context, token, HOME_PATH)
-        value = self._action_value(result)
-        # ApexActionController wraps the Apex return value one level deeper than plain Apex actions.
-        if isinstance(value, dict) and "returnValue" in value:
-            value = value["returnValue"]
-        return _records(value)
 
     async def async_fetch_usage(self, ids: AccountIds, date_from: date, date_to: date) -> list[DailyUsage]:
         """Fetch daily water usage for an inclusive date range.
@@ -906,34 +884,25 @@ class SewClient:
                 usage.append(self._parse_usage(day, self._action_value(result)))
         return usage
 
-    @staticmethod
-    def _usage_action(ids: AccountIds, day: date) -> dict[str, Any]:
+    @classmethod
+    def _usage_action(cls, ids: AccountIds, day: date) -> dict[str, Any]:
         """Build the ``getUsageData`` action for one day."""
-        return {
-            "callingDescriptor": "UNKNOWN",
-            "descriptor": "aura://ApexActionController/ACTION$execute",
-            "params": {
-                "cacheable": False,
-                "classname": APEX_USAGE_CLASSNAME,
-                "isContinuation": False,
-                "method": APEX_USAGE_METHOD,
-                "namespace": "",
-                "params": {
-                    "baId": ids.billing_account_id,
-                    "dateFrom": day.isoformat(),
-                    "dateTo": day.isoformat(),
-                    "meterId": ids.meter_id,
-                    "resolution": USAGE_RESOLUTION,
-                },
+        return cls._apex_action(
+            APEX_USAGE_CLASSNAME,
+            APEX_USAGE_METHOD,
+            {
+                "baId": ids.billing_account_id,
+                "dateFrom": day.isoformat(),
+                "dateTo": day.isoformat(),
+                "meterId": ids.meter_id,
+                "resolution": USAGE_RESOLUTION,
             },
-        }
+        )
 
     @staticmethod
     def _parse_usage(day: date, value: Any) -> DailyUsage:
         """Turn one ``getUsageData`` return value into a ``DailyUsage``."""
-        # ApexActionController wraps the Apex return value one level deeper than plain Apex actions.
-        if isinstance(value, dict) and "returnValue" in value:
-            value = value["returnValue"]
+        value = _unwrap(value)
         entry: dict[str, Any] | None = None
         if isinstance(value, list):
             entry = next((e for e in value if isinstance(e, dict)), None)
