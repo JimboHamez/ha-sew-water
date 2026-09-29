@@ -3,7 +3,10 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.2.1b1] — 2026-09-29
+
+Beta for [#5](https://github.com/JimboHamez/ha-sew-water/issues/5): setup failing after the one-time
+code with "The portal responded unexpectedly".
 
 ### Fixed
 - When the portal silently drops the billing-account or meter lookup during setup
