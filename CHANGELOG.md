@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.2.1] — 2026-09-29
 
 ### Fixed
 - Setup, Reconfigure and re-authentication failed for every account after the one-time code with
