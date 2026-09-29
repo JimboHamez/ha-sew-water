@@ -415,6 +415,66 @@ async def test_discover_ids_without_property_is_protocol_error(client: SewClient
         await client.async_discover_ids()
 
 
+def dropped_envelope() -> dict[str, Any]:
+    """The envelope Aura sends when it silently drops an ``apex://`` action (issue #5)."""
+    return {"actions": [], "context": {"mode": "PROD", "fwuid": FWUID_HOME}, "perfSummary": {}}
+
+
+async def test_discover_ids_retries_dropped_action_through_apex_controller(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, payload=dropped_envelope())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope({"returnValue": json.dumps([account_record()])}))
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps([meter_record()])))
+    with patch.object(sew_client._LOGGER, "debug") as debug:
+        ids = await client.async_discover_ids()
+    assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
+    assert any("actions=0 expected=1" in line for line in debug_lines(debug))
+
+    (retry,) = aura_message(posted_form(mocked, "/s/sfsites/aura", index=1))["actions"]
+    assert retry["descriptor"] == "aura://ApexActionController/ACTION$execute"
+    assert retry["params"]["classname"] == "cm_AccountBillingUsageAURA"
+    assert retry["params"]["method"] == "retrieveBillingAccounts"
+    assert retry["params"]["params"] == {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS}
+    (meter,) = aura_message(posted_form(mocked, "/s/sfsites/aura", index=2))["actions"]
+    assert meter["descriptor"] == "apex://cm_AccountBillingUsageAURA/ACTION$retrieveSObject"
+
+
+async def test_discover_ids_reports_why_the_retry_was_refused(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, payload=dropped_envelope())
+    refused = aura_envelope({"cacheable": False}, state="ERROR")
+    refused["actions"][0]["error"] = [{"message": "You do not have access to the Apex class named 'X'."}]
+    mocked.post(AURA_URL, status=200, payload=refused)
+    with pytest.raises(SewProtocolError, match="do not have access"):
+        await client.async_discover_ids()
+
+
+async def test_aura_error_body_is_reported_with_its_message(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, body='*/{"message":"No apex action available for X.y"}/*ERROR*/')
+    with pytest.raises(SewProtocolError, match="Aura error: No apex action available for X.y"):
+        await client.async_discover_ids()
+
+
+async def test_aura_error_body_about_limits_is_busy(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, body='*/{"message":"Concurrent requests limit exceeded"}/*ERROR*/')
+    with pytest.raises(SewBusyError):
+        await client.async_discover_ids()
+
+
+async def test_aura_non_json_body_is_logged_and_protocol_error(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, body="<html>maintenance sid=SECRET</html>")
+    with patch.object(sew_client._LOGGER, "debug") as debug, pytest.raises(SewProtocolError, match="not JSON"):
+        await client.async_discover_ids()
+    lines = debug_lines(debug)
+    assert any("maintenance" in line for line in lines)
+    assert not any("SECRET" in line for line in lines)
+
+
 async def test_discover_ids_with_unparseable_accounts_is_protocol_error(
     client: SewClient, mocked: aioresponses
 ) -> None:

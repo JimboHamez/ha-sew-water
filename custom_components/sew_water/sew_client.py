@@ -82,6 +82,8 @@ _MFA_ERROR_RE = re.compile(
 _BUSY_RE = re.compile(r"concurrent requests limit|request limit exceeded|too many requests", re.IGNORECASE)
 _FRONTDOOR_MARKER = "frontdoor.jsp"
 _SID_RE = re.compile(r"(sid=)[^&\"'\s]+", re.IGNORECASE)
+# Aura reports some server-side failures as ``*/{"message": ...}/*ERROR*/`` instead of an envelope.
+_AURA_ERROR_RE = re.compile(r"^\s*\*/(\{.*\})/\*ERROR\*/\s*$", re.DOTALL)
 
 
 class SewError(Exception):
@@ -111,6 +113,14 @@ class SewAuthError(SewError):
 
 class SewProtocolError(SewError):
     """The portal responded with something the client does not understand."""
+
+
+class SewActionDroppedError(SewProtocolError):
+    """The portal answered with no action results and no error.
+
+    Aura silently drops an ``apex://`` action when the class or method does not exist or the session
+    may not call it, so the response gives no reason.
+    """
 
 
 class SewLoginUnexplainedError(SewProtocolError):
@@ -464,7 +474,7 @@ class SewClient:
         try:
             envelope = json.loads(text)
         except ValueError as err:
-            raise SewProtocolError("Aura response is not JSON") from err
+            raise self._aura_error(text) from err
         if envelope.get("exceptionEvent"):
             descriptor = str(envelope.get("event", {}).get("descriptor", ""))
             detail = str(envelope.get("message") or "")
@@ -483,8 +493,35 @@ class SewClient:
             raise SewProtocolError(f"Aura exception event: {descriptor or detail}")
         results = envelope.get("actions")
         if not isinstance(results, list) or len(results) != len(actions):
+            # The context block is long and would push any events past the redaction's length cap.
+            context_block = envelope.get("context")
+            _LOGGER.debug(
+                "Aura envelope keys=%s actions=%s expected=%d app=%s; body without context: %s",
+                sorted(envelope),
+                len(results) if isinstance(results, list) else type(results).__name__,
+                len(actions),
+                context_block.get("app") if isinstance(context_block, dict) else None,
+                _redact({k: v for k, v in envelope.items() if k != "context"}),
+            )
+            if results == []:
+                raise SewActionDroppedError("Aura response has no action results and no error")
             raise SewProtocolError("Aura response has an unexpected number of actions")
         return cast(dict[str, Any], envelope)
+
+    @staticmethod
+    def _aura_error(text: str) -> SewError:
+        """Build the error for an Aura response body that is not a JSON envelope."""
+        match = _AURA_ERROR_RE.match(text)
+        if match is None:
+            _LOGGER.debug("Aura response is not JSON: %s", _SID_RE.sub(r"\1<redacted>", text[:500]))
+            return SewProtocolError("Aura response is not JSON")
+        try:
+            detail = str(json.loads(match.group(1)).get("message") or "")
+        except (AttributeError, ValueError):
+            detail = ""
+        if _BUSY_RE.search(detail):
+            return SewBusyError(f"Portal is throttling requests: {detail}")
+        return SewProtocolError(f"Aura error: {detail or 'no message'}")
 
     @staticmethod
     def _action_value(result: dict[str, Any]) -> Any:
@@ -520,13 +557,21 @@ class SewClient:
             return False
         cookie_name = _TOKEN_COOKIE_NAME_RE.search(page)
         token_cookie = resp.cookies.get(cookie_name.group(1)) if cookie_name else None
+        source = "named"
         if token_cookie is None:
             # Fall back to any ERIC token cookie issued by this response.
             token_cookie = next((c for n, c in resp.cookies.items() if n.startswith("__Host-ERIC")), None)
+            source = "fallback"
         if token_cookie is None:
             raise SewProtocolError("Home page did not issue an Aura token")
         self._token = token_cookie.value
         self._context = _parse_aura_context(page, AURA_APP_COMMUNITY)
+        _LOGGER.debug(
+            "Home page loaded from %s via %s; Aura token from the %s cookie",
+            resp.url.path,
+            [r.url.path for r in resp.history] or "no redirects",
+            source,
+        )
         return True
 
     async def _ensure_home(self) -> tuple[AuraContext, str]:
@@ -661,6 +706,7 @@ class SewClient:
             self._mfa_form = _parse_mfa_form(page)
             raise SewAuthError(error.group(0).strip() if error else "Code rejected")
         self._mfa_form = None
+        _LOGGER.debug("Code accepted; the portal pointed to %s", URL(redirected).path if redirected else "no page")
         if not await self._load_home():
             raise SewAuthError("Portal did not accept the code")
 
@@ -763,13 +809,9 @@ class SewClient:
             SewProtocolError: If the IDs cannot be found.
         """
         context, token = await self._ensure_home()
-        accounts_action = {
-            "callingDescriptor": "markup://c:PortalDataHub",
-            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION$retrieveBillingAccounts",
-            "params": {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS},
-        }
-        (result,) = await self._aura([accounts_action], context, token, HOME_PATH)
-        accounts = _records(self._action_value(result))
+        accounts = await self._portal_records(
+            "retrieveBillingAccounts", {"fieldsToRetrieve": BILLING_ACCOUNT_FIELDS}, context, token
+        )
         account = next((a for a in accounts if isinstance(a.get("Id"), str)), None)
         if account is None:
             raise SewProtocolError("No billing account found for this login")
@@ -777,17 +819,12 @@ class SewClient:
         property_id = account.get("Property__c")
         if not isinstance(property_id, str) or not property_id:
             raise SewProtocolError("Billing account has no property")
-        meter_action = {
-            "callingDescriptor": "markup://c:PortalDataHub",
-            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION$retrieveSObject",
-            "params": {
-                "fieldsToRetrieve": METER_FIELDS,
-                "objectToReturn": "Meter_Details__c",
-                "whereClause": f"Property__c IN ('{property_id}') AND {METER_DIGITAL_FILTER}",
-            },
+        meter_params = {
+            "fieldsToRetrieve": METER_FIELDS,
+            "objectToReturn": "Meter_Details__c",
+            "whereClause": f"Property__c IN ('{property_id}') AND {METER_DIGITAL_FILTER}",
         }
-        (result,) = await self._aura([meter_action], context, token, HOME_PATH)
-        meters = _records(self._action_value(result))
+        meters = await self._portal_records("retrieveSObject", meter_params, context, token)
         meter = next((m for m in meters if isinstance(m.get("Id"), str)), None)
         if meter is None:
             raise SewProtocolError("No digital meter found for the property")
@@ -797,6 +834,47 @@ class SewClient:
             meter_id=str(meter["Id"]),
             meter_serial=str(serial) if serial else None,
         )
+
+    async def _portal_records(
+        self, method: str, params: dict[str, Any], context: AuraContext, token: str
+    ) -> list[dict[str, Any]]:
+        """Call a ``cm_AccountBillingUsageAURA`` method and return the records it serialised.
+
+        The portal's own page calls these as ``apex://`` actions. When the portal drops that action without
+        a reason, the same method is called once more through ``ApexActionController``, which either
+        succeeds or says why it refused.
+
+        Raises:
+            SewProtocolError: If both forms fail.
+        """
+        action = {
+            "callingDescriptor": "markup://c:PortalDataHub",
+            "descriptor": f"apex://{APEX_PORTAL_CLASSNAME}/ACTION${method}",
+            "params": params,
+        }
+        try:
+            (result,) = await self._aura([action], context, token, HOME_PATH)
+            return _records(self._action_value(result))
+        except SewActionDroppedError:
+            _LOGGER.debug("Portal dropped %s; retrying through ApexActionController", method)
+        action = {
+            "callingDescriptor": "UNKNOWN",
+            "descriptor": "aura://ApexActionController/ACTION$execute",
+            "params": {
+                "cacheable": False,
+                "classname": APEX_PORTAL_CLASSNAME,
+                "isContinuation": False,
+                "method": method,
+                "namespace": "",
+                "params": params,
+            },
+        }
+        (result,) = await self._aura([action], context, token, HOME_PATH)
+        value = self._action_value(result)
+        # ApexActionController wraps the Apex return value one level deeper than plain Apex actions.
+        if isinstance(value, dict) and "returnValue" in value:
+            value = value["returnValue"]
+        return _records(value)
 
     async def async_fetch_usage(self, ids: AccountIds, date_from: date, date_to: date) -> list[DailyUsage]:
         """Fetch daily water usage for an inclusive date range.

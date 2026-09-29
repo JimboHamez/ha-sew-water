@@ -3,6 +3,18 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- When the portal silently drops the billing-account or meter lookup during setup
+  ([#5](https://github.com/JimboHamez/ha-sew-water/issues/5)), the lookup is retried once through
+  Salesforce's `ApexActionController`. That either returns the records or gives the portal's reason
+  for refusing, instead of the generic "The portal responded unexpectedly".
+- Debug logging now covers this failure. It records the shape of an unexpected Aura response (with
+  session IDs masked), the page the one-time code step pointed to, and how the home page's Aura token
+  was found. Portal error responses in the `*/{...}/*ERROR*/` form are reported with their message
+  instead of "not JSON".
+
 ## [2.2.0] — 2026-09-23
 
 ### Added
