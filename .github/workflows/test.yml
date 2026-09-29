@@ -27,6 +27,23 @@ jobs:
         # that pytest-homeassistant-custom-component pulls in. Silver requires >= 95% coverage.
         run: pytest -q -p no:logging --cov=custom_components/sew_water --cov-report=term-missing --cov-fail-under=95
 
+  client-aiohttp-314:
+    name: client tests (aiohttp 3.14)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Install dependencies
+        # Home Assistant 2026.9 ships aiohttp 3.14 on Python 3.14. The client tests need no Home Assistant,
+        # so they run on that stack ahead of the pytest job, which follows the pinned Home Assistant.
+        run: |
+          python -m pip install --upgrade pip
+          pip install "aiohttp~=3.14.0" "aioresponses>=0.7.8" "pytest>=8.0" "pytest-asyncio>=0.24"
+      - name: Run client tests
+        run: pytest -q -p no:logging tests/test_sew_client.py
+
   ruff:
     name: ruff
     runs-on: ubuntu-latest

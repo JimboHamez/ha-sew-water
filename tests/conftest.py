@@ -7,15 +7,20 @@ all identifiers replaced by obviously fake values.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from contextlib import ExitStack
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 import sys
 from typing import Any
+from unittest.mock import Mock, patch
 from urllib.parse import quote
 
 import aiohttp
 from aioresponses import aioresponses
+from aioresponses.compat import stream_reader_factory as _original_stream_reader_factory
+import aioresponses.core as aioresponses_core
 import pytest
 
 # The client has no Home Assistant imports, but importing it through the package would execute
@@ -146,8 +151,44 @@ def client(session: aiohttp.ClientSession) -> SewClient:
     return SewClient(session, BASE)
 
 
+class _StreamWriterDefaultResponse(aiohttp.ClientResponse):
+    """A ``ClientResponse`` that supplies the ``stream_writer`` aioresponses does not pass."""
+
+    def __init__(self, method: str, url: Any, **kwargs: Any) -> None:
+        # aiohttp only reads ``output_size`` from it once the request has been sent.
+        kwargs.setdefault("stream_writer", Mock(output_size=0))
+        super().__init__(method, url, **kwargs)
+
+
+def _stream_reader_with_parser(loop: Any = None) -> aiohttp.StreamReader:
+    """Build aioresponses' body reader with a stub parser for aiohttp 3.14's flow control."""
+    reader = _original_stream_reader_factory(loop)
+    protocol: Any = reader._protocol
+    if getattr(protocol, "_parser", None) is None:
+        protocol._parser = Mock()
+        protocol._parser.feed_data.return_value = ([], False, b"")
+    return reader
+
+
+def _aioresponses_compat_patches() -> ExitStack:
+    """Patch aioresponses 0.7.9 for aiohttp 3.14 while it is in use.
+
+    aiohttp 3.14 made ``stream_writer`` a required ``ClientResponse`` argument and made
+    ``pause_reading()`` delegate to the protocol's parser, which aioresponses' bare protocol lacks.
+    These mirror the unmerged upstream fixes (pnuckowski/aioresponses#288 and #292, issue #289). On
+    older aiohttp nothing is patched, and both patches step aside once aioresponses supplies these
+    itself. Remove this when a fixed aioresponses is released and pinned.
+    """
+    stack = ExitStack()
+    if "stream_writer" not in inspect.signature(aiohttp.ClientResponse).parameters:
+        return stack
+    stack.enter_context(patch.object(aioresponses_core, "ClientResponse", _StreamWriterDefaultResponse))
+    stack.enter_context(patch.object(aioresponses_core, "stream_reader_factory", _stream_reader_with_parser))
+    return stack
+
+
 @pytest.fixture
 def mocked() -> Iterator[aioresponses]:
     """Intercept all outbound HTTP."""
-    with aioresponses() as m:
+    with _aioresponses_compat_patches(), aioresponses() as m:
         yield m
