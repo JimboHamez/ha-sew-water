@@ -363,7 +363,7 @@ Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items
 | Component | Version |
 |---|---|
 | Home Assistant | 2025.12 or newer (2026.3 or newer to show the integration's own icon) |
-| Python | 3.13 (as shipped with Home Assistant) |
+| Python | 3.13 or 3.14 (as shipped with Home Assistant) |
 | Runtime dependencies | `aiohttp` (ships with Home Assistant) |
 | Utility | South East Water only (mains water) |
 | Quality scale | No tier claimed: the portal client is bundled rather than published as a library — see [Home Assistant quality scale](#home-assistant-quality-scale) |

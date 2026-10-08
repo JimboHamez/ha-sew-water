@@ -17,32 +17,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
       - name: Run tests
         # Client tests are offline (aioresponses); the tests/ha suite runs against the Home Assistant
-        # that pytest-homeassistant-custom-component pulls in. Silver requires >= 95% coverage.
+        # that pytest-homeassistant-custom-component pulls in. Home Assistant 2026.10 needs Python 3.14, so on
+        # 3.13 pip would quietly resolve an older release. Silver requires >= 95% coverage.
         run: pytest -q -p no:logging --cov=custom_components/sew_water --cov-report=term-missing --cov-fail-under=95
-
-  client-aiohttp-314:
-    name: client tests (aiohttp 3.14)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.14"
-      - name: Install dependencies
-        # Home Assistant 2026.9 ships aiohttp 3.14 on Python 3.14. The client tests need no Home Assistant,
-        # so they run on that stack ahead of the pytest job, which follows the pinned Home Assistant.
-        run: |
-          python -m pip install --upgrade pip
-          pip install "aiohttp~=3.14.0" "aioresponses>=0.7.8" "pytest>=8.0" "pytest-asyncio>=0.24"
-      - name: Run client tests
-        run: pytest -q -p no:logging tests/test_sew_client.py
 
   ruff:
     name: ruff
@@ -51,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install ruff
         run: pip install -r requirements_test.txt
       - name: Format check
@@ -66,7 +50,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - name: Install dependencies
         # Home Assistant is installed so mypy can resolve the framework imports.
         run: |
