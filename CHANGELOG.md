@@ -3,9 +3,13 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.2.2] — 2026-10-08
 
 ### Changed
+- Tested with Home Assistant 2026.10 on Python 3.14. CI now runs on Python 3.14, so it tests the
+  current Home Assistant release instead of an older one. The integration needed no changes for 2026.10.
+  If re-authentication fails after the one-time code with *The portal responded unexpectedly*, the
+  install is on v2.2.0 or older; update ([#7](https://github.com/JimboHamez/ha-sew-water/issues/7)).
 - When a login has more than one digital meter, setup logs how many it found and that it used the
   first one the portal lists. The meter serials are logged at debug level only, so they can be checked
   without showing up in normal logs. Which meter is picked has not changed.

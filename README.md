@@ -35,7 +35,12 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.2.1
+## 🆕 What's new in v2.2.2
+
+- **Tested with Home Assistant 2026.10** on Python 3.14. The integration needed no changes for 2026.10. If re-authentication fails after the one-time code with *The portal responded unexpectedly*, you're on v2.2.0 or older; update ([#7](https://github.com/JimboHamez/ha-sew-water/issues/7)).
+- **Logins with more than one digital meter** now log how many were found and that the first one was used. Which meter is picked has not changed.
+
+From v2.2.1:
 
 - **Setup works again** ([#5](https://github.com/JimboHamez/ha-sew-water/issues/5)). South East Water removed the portal call used to find your billing account, so setup, Reconfigure and re-authentication all stopped after the one-time code with *The portal responded unexpectedly*. The integration now uses the call the portal's own usage page makes. Installs that were already set up kept polling throughout; update before you next need to sign in again.
 - **Logins with more than one billing account** now get the account whose property has the digital meter.
@@ -52,7 +57,7 @@ From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/Ji
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.1).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.2).
 
 ---
 
