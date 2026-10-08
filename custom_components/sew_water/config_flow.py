@@ -32,6 +32,9 @@ from homeassistant.helpers.selector import (
     TimeSelector,
 )
 from homeassistant.util import dt as dt_util
+
+# Home Assistant 2026.10 runs voluptuous as Probatio but types schemas as Probatio's, so calls that pass a schema
+# carry an arg-type ignore.
 import voluptuous as vol
 
 from .const import (
@@ -190,7 +193,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_USERNAME] = "invalid_email"
             elif (result := await self._async_login(errors)) is not None:
                 return result
-        return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors)
+        return self.async_show_form(step_id="user", data_schema=STEP_USER_SCHEMA, errors=errors)  # type: ignore[arg-type]
 
     async def async_step_mfa_channel(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Choose where the portal should send the one-time code."""
@@ -219,7 +222,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             }
         )
-        return self.async_show_form(step_id="mfa_channel", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="mfa_channel", data_schema=schema, errors=errors)  # type: ignore[arg-type]
 
     async def async_step_mfa_code(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Verify the one-time code the user received."""
@@ -237,7 +240,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 return await self._async_finish()
-        return self.async_show_form(step_id="mfa_code", data_schema=STEP_CODE_SCHEMA, errors=errors)
+        return self.async_show_form(step_id="mfa_code", data_schema=STEP_CODE_SCHEMA, errors=errors)  # type: ignore[arg-type]
 
     async def async_step_history(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Optionally take the meter's installation date; the history is imported after setup."""
@@ -254,7 +257,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
                     data[CONF_IMPORT_FROM] = start.isoformat()
             if not errors:
                 return self.async_create_entry(title=self._username, data=data)
-        return self.async_show_form(step_id="history", data_schema=STEP_HISTORY_SCHEMA, errors=errors)
+        return self.async_show_form(step_id="history", data_schema=STEP_HISTORY_SCHEMA, errors=errors)  # type: ignore[arg-type]
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Sign in again with possibly changed credentials and replace the stored session."""
@@ -273,7 +276,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD): PASSWORD_SELECTOR,
             }
         )
-        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="reconfigure", data_schema=schema, errors=errors)  # type: ignore[arg-type]
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Start reauthentication after the stored session expired."""
@@ -293,7 +296,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         assert self._username is not None
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema({}),  # type: ignore[arg-type]
             description_placeholders={CONF_USERNAME: self._username},
             errors=errors,
         )
@@ -315,7 +318,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         assert self._username is not None
         return self.async_show_form(
             step_id="reauth_password",
-            data_schema=schema,
+            data_schema=schema,  # type: ignore[arg-type]
             description_placeholders={CONF_USERNAME: self._username},
             errors=errors,
         )
@@ -349,4 +352,4 @@ class SewOptionsFlow(OptionsFlowWithReload):
                 vol.Required(CONF_POLL_TIME, default=options.get(CONF_POLL_TIME, DEFAULT_POLL_TIME)): TimeSelector(),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="init", data_schema=schema)  # type: ignore[arg-type]

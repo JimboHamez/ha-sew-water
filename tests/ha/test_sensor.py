@@ -40,8 +40,8 @@ async def test_entities_are_created_on_one_device(
         f"{setup_integration.entry_id}_total_usage",
         f"{setup_integration.entry_id}_last_reading_date",
     }
-    device = device_registry.async_get_device(identifiers={(DOMAIN, setup_integration.entry_id)})
-    assert device is not None
+    (device,) = dr.async_entries_for_config_entry(device_registry, setup_integration.entry_id)
+    assert device.identifiers == {(DOMAIN, setup_integration.entry_id)}
     assert device.manufacturer == MANUFACTURER
     assert device.name == MANUFACTURER
     assert len({entry.device_id for entry in entries}) == 1

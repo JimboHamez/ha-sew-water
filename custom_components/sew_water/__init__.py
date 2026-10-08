@@ -13,6 +13,9 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.typing import ConfigType
+
+# Home Assistant 2026.10 runs voluptuous as Probatio but types schemas as Probatio's, so calls that pass a schema
+# carry an arg-type ignore.
 import voluptuous as vol
 
 from .const import (
@@ -64,7 +67,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 ) from err
 
     hass.services.async_register(DOMAIN, SERVICE_FORCE_IMPORT, _force_import)
-    hass.services.async_register(DOMAIN, SERVICE_IMPORT_FROM_DATE, _import_from_date, schema=IMPORT_FROM_DATE_SCHEMA)
+    hass.services.async_register(DOMAIN, SERVICE_IMPORT_FROM_DATE, _import_from_date, schema=IMPORT_FROM_DATE_SCHEMA)  # type: ignore[arg-type]
     return True
 
 
