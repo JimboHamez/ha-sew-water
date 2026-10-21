@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.2.3] — 2026-10-21
+
+### Fixed
+- A stored session that the portal stops allowing to read usage data now brings up the
+  *Reauthentication required* card. Before, setup failed with *Aura action failed: You do not have
+  access to the Apex class named 'MysewUsageBillingGraphController'* and retried indefinitely; the only
+  way out was to remove and re-add the integration
+  ([#10](https://github.com/JimboHamez/ha-sew-water/issues/10)).
+
 ## [2.2.2] — 2026-10-08
 
 ### Changed

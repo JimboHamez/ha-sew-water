@@ -35,7 +35,11 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.2.2
+## 🆕 What's new in v2.2.3
+
+- **Re-login instead of a setup loop** ([#10](https://github.com/JimboHamez/ha-sew-water/issues/10)). When the portal stops letting a stored session read usage data, the *Reauthentication required* card now asks for a new one-time code. Before, setup retried indefinitely with *You do not have access to the Apex class named 'MysewUsageBillingGraphController'* until the integration was removed and added again.
+
+From v2.2.2:
 
 - **Tested with Home Assistant 2026.10** on Python 3.14. The integration needed no changes for 2026.10. If re-authentication fails after the one-time code with *The portal responded unexpectedly*, you're on v2.2.0 or older; update ([#7](https://github.com/JimboHamez/ha-sew-water/issues/7)).
 - **Logins with more than one digital meter** now log how many were found and that the first one was used. Which meter is picked has not changed.
@@ -57,7 +61,7 @@ From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/Ji
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.2).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.3).
 
 ---
 
@@ -334,6 +338,7 @@ actions:
 | Setup shows *The portal did not accept the sign-in but gave no reason* | The portal's login call returned neither a session nor a rejection message. This is not the normal wrong-password response. | Confirm the same details work at my.southeastwater.com.au. Then enable debug logging (below), retry, and open an issue with the `Login gave neither a redirect nor a reason` log line — session IDs in it are masked. |
 | Setup shows *Enter a valid email address* | The address is missing an `@` or a domain. | Check for typos or stray characters; the check is deliberately loose. |
 | Setup shows *The code was not accepted* | Wrong or expired code. | Codes are six digits and short-lived. Request a new one by going back a step. |
+| *Failed setup, will retry* with *You do not have access to the Apex class named 'MysewUsageBillingGraphController'* | The stored session still exists but the portal no longer lets it read usage data. Only a new login fixes this. | Update to v2.2.3 or later, which shows the *Reauthentication required* card for this instead. On older versions, remove the integration and add it again; statistics are kept. |
 | Setup shows *The portal responded unexpectedly* | The portal's pages or responses did not match what the integration expects. | Enable debug logging (below), retry, and open an issue with the log excerpt. It usually means the portal changed. |
 | Repair issue *needs to be set up again* | A config entry from an earlier integration version was found; it holds no portal session and cannot be migrated. | Delete that entry and add the integration again. Existing statistics are kept. |
 | *Daily usage* is `unknown` or the last reading date is several days old | The portal has not published recent days yet, or is returning zeros for them. | Check the portal's *Usage* page for the same days. The next daily poll re-imports the last 30 days automatically; press **Update now** (or call `sew_water.force_import`) to do it now. If this happens every day, set a later **Poll time** in the options. |
