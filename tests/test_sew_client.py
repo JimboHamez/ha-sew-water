@@ -499,9 +499,18 @@ async def test_discover_ids_with_unexpected_value_is_protocol_error(
 async def test_discover_ids_refused_by_the_portal_reports_its_reason(client: SewClient, mocked: aioresponses) -> None:
     mock_home(mocked)
     refused = aura_envelope({"cacheable": False}, state="ERROR")
+    refused["actions"][0]["error"] = [{"message": "No apex action available for X.y"}]
+    mocked.post(AURA_URL, status=200, payload=refused)
+    with pytest.raises(SewProtocolError, match="No apex action available"):
+        await client.async_discover_ids()
+
+
+async def test_discover_ids_without_apex_access_is_auth_error(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    refused = aura_envelope({"cacheable": False}, state="ERROR")
     refused["actions"][0]["error"] = [{"message": "You do not have access to the Apex class named 'X'."}]
     mocked.post(AURA_URL, status=200, payload=refused)
-    with pytest.raises(SewProtocolError, match="do not have access"):
+    with pytest.raises(SewAuthError, match="do not have access"):
         await client.async_discover_ids()
 
 
@@ -653,6 +662,18 @@ async def test_fetch_usage_action_error_is_protocol_error(client: SewClient, moc
     payload["actions"][0]["error"] = [{"message": "Attempt to de-reference a null object"}]
     mocked.post(AURA_URL, status=200, payload=payload)
     with pytest.raises(SewProtocolError, match="null object"):
+        await client.async_fetch_usage(IDS, date(2026, 9, 13), date(2026, 9, 13))
+
+
+async def test_fetch_usage_without_apex_access_is_auth_error(client: SewClient, mocked: aioresponses) -> None:
+    """A session that still loads the home page but may not run the usage class needs a new login (issue #10)."""
+    mock_home(mocked)
+    payload = aura_envelope(None, state="ERROR")
+    payload["actions"][0]["error"] = [
+        {"message": "You do not have access to the Apex class named 'MysewUsageBillingGraphController'."}
+    ]
+    mocked.post(AURA_URL, status=200, payload=payload)
+    with pytest.raises(SewAuthError, match="MysewUsageBillingGraphController"):
         await client.async_fetch_usage(IDS, date(2026, 9, 13), date(2026, 9, 13))
 
 

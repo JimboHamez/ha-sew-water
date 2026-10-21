@@ -78,6 +78,9 @@ _MFA_ERROR_RE = re.compile(
 )
 # Salesforce reports throttling as an Apex error message, not as an HTTP status.
 _BUSY_RE = re.compile(r"concurrent requests limit|request limit exceeded|too many requests", re.IGNORECASE)
+# A session that still loads the home page can lack access to the portal's Apex classes; only a new
+# login restores it (issue #10).
+_NO_APEX_ACCESS_RE = re.compile(r"do not have access to the Apex class", re.IGNORECASE)
 _FRONTDOOR_MARKER = "frontdoor.jsp"
 _SID_RE = re.compile(r"(sid=)[^&\"'\s]+", re.IGNORECASE)
 # Aura reports some server-side failures as ``*/{"message": ...}/*ERROR*/`` instead of an envelope.
@@ -529,6 +532,8 @@ class SewClient:
             message = errors[0].get("message") if errors and isinstance(errors[0], dict) else result.get("state")
             if _BUSY_RE.search(str(message)):
                 raise SewBusyError(f"Portal is throttling requests: {message}")
+            if _NO_APEX_ACCESS_RE.search(str(message)):
+                raise SewAuthError(f"Portal session lacks access: {message}")
             raise SewProtocolError(f"Aura action failed: {message}")
         return result.get("returnValue")
 
