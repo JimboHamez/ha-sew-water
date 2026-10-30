@@ -3,7 +3,9 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.2.4b1] — 2026-10-30
+
+Beta. Everyone not testing it should stay on 2.2.3.
 
 ### Changed
 - General privacy and hardening improvements.
