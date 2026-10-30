@@ -11,3 +11,13 @@ updates:
       github-actions:
         patterns:
           - "*"
+
+  # Test and lint dependencies in requirements_test.txt. The integration bundles its client, so manifest.json has none.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-test-deps:
+        patterns:
+          - "*"
