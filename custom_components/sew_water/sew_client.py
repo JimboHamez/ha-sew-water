@@ -713,7 +713,7 @@ class SewClient:
             raise SewProtocolError("Home page did not issue an Aura token")
         self._token = token_cookie.value
         self._context = _parse_aura_context(page, AURA_APP_COMMUNITY)
-        _LOGGER.debug("Home page loaded from %s; Aura token from the %s cookie", resp.url.path, source)
+        _LOGGER.debug("Home page loaded from %s; the %s cookie supplied the Aura token", resp.url.path, source)
         return True
 
     async def _ensure_home(self) -> tuple[AuraContext, str]:
