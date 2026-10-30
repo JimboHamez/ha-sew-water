@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import issue_registry as ir
@@ -20,13 +21,14 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sew_water.const import (
     CONF_COOKIES,
     DOMAIN,
+    ENTRY_TITLE,
     SERVICE_ATTR_START_DATE,
     SERVICE_FORCE_IMPORT,
     SERVICE_IMPORT_FROM_DATE,
 )
 from custom_components.sew_water.sew_client import SewAuthError, SewConnectionError
 
-from .conftest import COOKIES, REFRESHED_COOKIES, FakeClient
+from .conftest import COOKIES, REFRESHED_COOKIES, USERNAME, FakeClient
 
 
 async def test_setup_restores_session_and_loads(
@@ -35,6 +37,8 @@ async def test_setup_restores_session_and_loads(
     assert setup_integration.state is ConfigEntryState.LOADED
     assert fake_client.imported_cookies == COOKIES
     assert ("is_alive", None) in fake_client.calls
+    # The running integration polls with a client that cannot log in or look up the account.
+    assert fake_client.constructed == [("integration", False)]
     assert hass.services.has_service(DOMAIN, SERVICE_FORCE_IMPORT)
     assert hass.services.has_service(DOMAIN, SERVICE_IMPORT_FROM_DATE)
 
@@ -99,6 +103,26 @@ async def test_v1_entry_is_refused_with_repair_issue(
     assert issue.severity is ir.IssueSeverity.ERROR
     assert not issue.is_fixable
     assert issue.translation_placeholders == {"title": "old@example.com"}
+
+
+@pytest.mark.parametrize(
+    ("old_title", "new_title"),
+    [(USERNAME, ENTRY_TITLE), (USERNAME.upper(), ENTRY_TITLE), ("Holiday house", "Holiday house")],
+)
+async def test_v2_1_entry_title_is_migrated(
+    hass: HomeAssistant, mock_config_entry: MockConfigEntry, fake_client: FakeClient, old_title: str, new_title: str
+) -> None:
+    """The login email is replaced as the title; a title the user chose is kept."""
+    entry = MockConfigEntry(
+        domain=DOMAIN, title=old_title, unique_id=USERNAME, version=2, minor_version=1, data=mock_config_entry.data
+    )
+    entry.add_to_hass(hass)
+    assert entry.data[CONF_USERNAME] == USERNAME
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.state is ConfigEntryState.LOADED
+    assert entry.minor_version == 2
+    assert entry.title == new_title
 
 
 async def test_force_import_polls_now(

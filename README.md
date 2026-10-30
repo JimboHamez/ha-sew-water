@@ -355,7 +355,7 @@ logger:
     custom_components.sew_water: debug
 ```
 
-Debug output never includes your password, cookies or one-time codes. Account identifiers (billing account, meter record ID) appear once at startup so you can verify the right meter was picked. **Diagnostics** (⋮ → *Download diagnostics* on the entry) has the same redactions and is safe to attach to an issue.
+Debug output never includes your email, password, cookies or one-time codes. Account identifiers (billing account, meter record ID, meter serial) appear once at startup, masked to their last four characters, so you can verify the right meter was picked. **Diagnostics** (⋮ → *Download diagnostics* on the entry) has the same redactions and is safe to attach to an issue.
 
 ---
 
@@ -378,7 +378,7 @@ Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items
 | Utility | South East Water only (mains water) |
 | Quality scale | No tier claimed: the portal client is bundled rather than published as a library — see [Home Assistant quality scale](#home-assistant-quality-scale) |
 
-Credentials are stored in the config entry — Home Assistant's private `.storage`, the same place every integration keeps its secrets. They are never logged and are redacted from diagnostics. Because the portal demands a one-time code on every login, the stored password alone cannot open a new session; it only saves you retyping it during re-authentication.
+Credentials are stored in the config entry — Home Assistant's private `.storage`, the same place every integration keeps its secrets. They are never logged and are redacted from diagnostics. Because the portal demands a one-time code on every login, the stored password alone cannot open a new session; it only saves you retyping it during re-authentication. Home Assistant backups include this storage, so keep them encrypted.
 
 ---
 

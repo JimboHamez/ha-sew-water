@@ -24,6 +24,8 @@ from sew_client import (  # loaded from file by conftest.py, without importing t
     SewConnectionError,
     SewLoginUnexplainedError,
     SewProtocolError,
+    SewRequestRefusedError,
+    mask_identifier,
 )
 
 from .conftest import (
@@ -208,6 +210,26 @@ async def test_network_failure_is_connection_error(client: SewClient, mocked: ai
     mocked.get(f"{BASE}/s/login/", exception=aiohttp.ClientConnectionError("dns"))
     with pytest.raises(SewConnectionError, match="dns"):
         await client.async_login("user@example.com", "hunter2")
+
+
+async def test_network_failure_masks_session_id(client: SewClient, mocked: aioresponses) -> None:
+    """An aiohttp error that quotes the frontdoor URL does not carry the session ID into the message."""
+    mocked.get(
+        f"{BASE}/s/login/",
+        exception=aiohttp.InvalidURL(f"{BASE}/secur/frontdoor.jsp?sid=00D!SECRET&retURL=%2Fs%2F"),
+    )
+    with pytest.raises(SewConnectionError) as excinfo:
+        await client.async_login("user@example.com", "hunter2")
+    assert "SECRET" not in str(excinfo.value)
+    assert "sid=<redacted>" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("value", "masked"),
+    [("SAHL123456", "***3456"), ("a08AB00000XyZ12QAC", "***2QAC"), ("short", "***"), (None, "none")],
+)
+def test_mask_identifier(value: str | None, masked: str) -> None:
+    assert mask_identifier(value) == masked
 
 
 # ------------------------------------------------------------------------------- mfa
@@ -423,7 +445,10 @@ async def test_discover_ids_with_two_digital_meters_on_one_property_uses_the_fir
     assert info_line == "Found 2 digital meters across 1 billing account(s); using the first the portal lists"
     # Serials are identifiers, so they appear only at debug level.
     assert METER_SERIAL not in info_line and "SAHL999999" not in info_line
-    assert f"['{METER_SERIAL}', 'SAHL999999']; using {METER_SERIAL}" in "\n".join(debug_lines(debug))
+    # Even at debug level they are masked to their last four characters.
+    debug_text = "\n".join(debug_lines(debug))
+    assert "['***0000', '***9999']; using ***0000" in debug_text
+    assert METER_SERIAL not in debug_text and "SAHL999999" not in debug_text
 
 
 async def test_discover_ids_with_a_digital_meter_on_each_account_uses_the_first_account(
@@ -767,9 +792,12 @@ async def test_login_follows_relative_frontdoor_and_rejects_unknown_page(
     mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
     mocked.post(AURA_URL, status=200, payload=aura_envelope("/secur/frontdoor.jsp?sid=FAKE-SID&retURL=%2F"))
     mocked.get(FRONTDOOR, status=302, headers={"Location": f"{BASE}/s/somewhere-else"})
-    mocked.get(f"{BASE}/s/somewhere-else", status=200, body="<html></html>")
-    with pytest.raises(SewProtocolError, match="Unexpected page after login"):
+    # The unknown page is refused before it is loaded, so it needs no mock.
+    with pytest.raises(
+        SewRequestRefusedError, match="Refused redirect to GET my.southeastwater.com.au/s/somewhere-else"
+    ):
         await client.async_login("user@example.com", "hunter2")
+    assert requested_paths(mocked) == ["/s/login/", "/s/sfsites/aura", "/secur/frontdoor.jsp"]
 
 
 async def test_login_page_skips_malformed_and_foreign_contexts(client: SewClient, mocked: aioresponses) -> None:
@@ -925,3 +953,93 @@ async def test_bad_gateway_is_connection_error(client: SewClient, mocked: aiores
     mocked.get(f"{BASE}/s/login/", status=502, body="bad gateway")
     with pytest.raises(SewConnectionError, match="502"):
         await client.async_login("user@example.com", "hunter2")
+
+
+# --------------------------------------------------------------------------- allowlist
+
+
+def requested_paths(mocked: aioresponses) -> list[str]:
+    """Return the path of every request the client sent, in order."""
+    return [url.path for (_, url), calls in mocked.requests.items() for _ in calls]
+
+
+async def test_poll_client_refuses_login_without_sending_anything(poll_client: SewClient, mocked: aioresponses) -> None:
+    with pytest.raises(SewRequestRefusedError, match="Refused request to GET my.southeastwater.com.au/s/login/"):
+        await poll_client.async_login("user@example.com", "hunter2")
+    assert requested_paths(mocked) == []
+
+
+async def test_poll_client_refuses_the_account_lookup(poll_client: SewClient, mocked: aioresponses) -> None:
+    """The lookup returns the customer's account records, so only a setup client may send it."""
+    mock_home(mocked)
+    with pytest.raises(
+        SewRequestRefusedError,
+        match="Refused Aura action MysewUsageBillingGraphController.getBillingAccountsAndMetersForUser",
+    ):
+        await poll_client.async_discover_ids()
+    assert requested_paths(mocked) == ["/s/"]
+
+
+async def test_poll_client_fetches_usage(poll_client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(usage_day("2026-06-01", [10] * 24)))
+    (usage,) = await poll_client.async_fetch_usage(IDS, date(2026, 6, 1), date(2026, 6, 1))
+    assert usage.litres == 240
+    assert requested_paths(mocked) == ["/s/", "/s/sfsites/aura"]
+
+
+async def test_poll_client_does_not_load_the_login_page_of_an_expired_session(
+    poll_client: SewClient, mocked: aioresponses
+) -> None:
+    mock_dead_home(mocked)
+    assert await poll_client.async_is_alive() is False
+    assert requested_paths(mocked) == ["/s/"]
+
+
+async def test_poll_client_aura_redirect_to_login_is_auth_error(poll_client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    mocked.post(AURA_URL, status=302, headers={"Location": f"{BASE}/s/login/?startURL=%2Fs%2F"})
+    with pytest.raises(SewAuthError, match="no longer valid"):
+        await poll_client.async_fetch_usage(IDS, date(2026, 6, 1), date(2026, 6, 1))
+    assert requested_paths(mocked) == ["/s/", "/s/sfsites/aura"]
+
+
+async def test_poll_client_refuses_a_redirect_to_another_portal_page(
+    poll_client: SewClient, mocked: aioresponses
+) -> None:
+    mocked.get(f"{BASE}/s/", status=302, headers={"Location": f"{BASE}/s/profile"})
+    with pytest.raises(SewRequestRefusedError, match="Refused redirect to GET my.southeastwater.com.au/s/profile"):
+        await poll_client.async_fetch_usage(IDS, date(2026, 6, 1), date(2026, 6, 1))
+    assert requested_paths(mocked) == ["/s/"]
+
+
+async def test_redirect_to_another_site_is_refused(client: SewClient, mocked: aioresponses) -> None:
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(FRONTDOOR))
+    mocked.get(FRONTDOOR, status=302, headers={"Location": "https://elsewhere.example/apex/PortalMFALoginFlow"})
+    with pytest.raises(
+        SewRequestRefusedError, match="Refused redirect to GET elsewhere.example/apex/PortalMFALoginFlow"
+    ):
+        await client.async_login("user@example.com", "hunter2")
+
+
+async def test_frontdoor_on_another_site_is_refused(client: SewClient, mocked: aioresponses) -> None:
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope("https://elsewhere.example/secur/frontdoor.jsp?sid=X"))
+    with pytest.raises(SewRequestRefusedError, match="Refused request to GET elsewhere.example/secur/frontdoor.jsp"):
+        await client.async_login("user@example.com", "hunter2")
+    assert requested_paths(mocked) == ["/s/login/", "/s/sfsites/aura"]
+
+
+async def test_scripted_redirect_to_an_unknown_page_is_refused(client: SewClient, mocked: aioresponses) -> None:
+    mocked.get(f"{BASE}/s/login/", status=200, body=login_page())
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(FRONTDOOR))
+    mocked.get(FRONTDOOR, status=200, body='<script>window.location.replace("/s/profile");</script>')
+    with pytest.raises(SewRequestRefusedError, match="/s/profile"):
+        await client.async_login("user@example.com", "hunter2")
+
+
+async def test_redirect_loop_is_connection_error(poll_client: SewClient, mocked: aioresponses) -> None:
+    mocked.get(f"{BASE}/s/", status=302, headers={"Location": f"{BASE}/s/"}, repeat=True)
+    with pytest.raises(SewConnectionError, match="redirected more than"):
+        await poll_client.async_is_alive()

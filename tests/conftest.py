@@ -147,7 +147,13 @@ async def session() -> AsyncIterator[aiohttp.ClientSession]:
 
 @pytest.fixture
 def client(session: aiohttp.ClientSession) -> SewClient:
-    """A client bound to the test session."""
+    """A setup client bound to the test session, allowed to log in and look up the account."""
+    return SewClient(session, BASE, setup=True)
+
+
+@pytest.fixture
+def poll_client(session: aiohttp.ClientSession) -> SewClient:
+    """A polling client bound to the test session, as the running integration uses."""
     return SewClient(session, BASE)
 
 

@@ -31,6 +31,7 @@ async def test_diagnostics_redacts_secrets_and_identifiers(
     coordinator = result["coordinator"]
     assert coordinator["last_poll"] is not None
     assert coordinator["latest"]["litres"] == 240
+    assert coordinator["latest"]["serial"] == REDACTED
     assert coordinator["total_litres"] > 0
     assert coordinator["window_days"] > 0
     assert coordinator["update_interval"]

@@ -50,6 +50,7 @@ from .const import (
     DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
+    ENTRY_TITLE,
     MIN_SCAN_INTERVAL,
 )
 from .coordinator import SewConfigEntry
@@ -60,6 +61,22 @@ _LOGGER = logging.getLogger(__name__)
 # Deliberately loose: one "@" with something either side and a dot in the domain. It catches typos
 # and pasted junk before a round trip to the portal without rejecting unusual but valid addresses.
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def mask_email(address: str) -> str:
+    """Mask the login email for display, keeping its first character and domain.
+
+    Args:
+        address: The login email.
+
+    Returns:
+        The address as ``u***@example.com``, or ``***`` when it has no domain.
+    """
+    local, at, domain = address.partition("@")
+    if not at or not local:
+        return "***"
+    return f"{local[0]}***@{domain}"
+
 
 USERNAME_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.EMAIL, autocomplete="username"))
 PASSWORD_SELECTOR = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password"))
@@ -83,6 +100,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
     """Walk the user through login, choosing a code channel and entering the code."""
 
     VERSION = 2
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
         """Initialise flow state."""
@@ -117,7 +135,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
             self._session = async_create_clientsession(
                 hass=self.hass, auto_cleanup=False, cookie_jar=aiohttp.CookieJar()
             )
-        self._client = SewClient(self._session)
+        self._client = SewClient(self._session, setup=True)
         return self._client
 
     async def _async_login(self, errors: dict[str, str]) -> ConfigFlowResult | None:
@@ -256,7 +274,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
                 else:
                     data[CONF_IMPORT_FROM] = start.isoformat()
             if not errors:
-                return self.async_create_entry(title=self._username, data=data)
+                return self.async_create_entry(title=ENTRY_TITLE, data=data)
         return self.async_show_form(step_id="history", data_schema=STEP_HISTORY_SCHEMA, errors=errors)  # type: ignore[arg-type]
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -297,7 +315,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=vol.Schema({}),  # type: ignore[arg-type]
-            description_placeholders={CONF_USERNAME: self._username},
+            description_placeholders={CONF_USERNAME: mask_email(self._username)},
             errors=errors,
         )
 
@@ -319,7 +337,7 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_password",
             data_schema=schema,  # type: ignore[arg-type]
-            description_placeholders={CONF_USERNAME: self._username},
+            description_placeholders={CONF_USERNAME: mask_email(self._username)},
             errors=errors,
         )
 

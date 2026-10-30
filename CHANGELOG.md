@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+- General privacy and hardening improvements.
+- The integration entry is now titled *South East Water*. Existing entries are renamed on update
+  unless you have given yours a different name.
+
 ## [2.2.3] — 2026-10-21
 
 ### Fixed

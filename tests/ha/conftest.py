@@ -24,6 +24,7 @@ from custom_components.sew_water.const import (
     CONF_METER_ID,
     CONF_METER_SERIAL,
     DOMAIN,
+    ENTRY_TITLE,
 )
 from custom_components.sew_water.sew_client import AccountIds, DailyUsage, LoginResult
 
@@ -72,6 +73,17 @@ class FakeClient:
         self.calls: list[tuple[str, Any]] = []
         self.fetch_ranges: list[tuple[date, date]] = []
         self.session = _FakeSession()
+        # Where each client was constructed and whether it was a setup client.
+        self.constructed: list[tuple[str, bool]] = []
+
+    def factory(self, where: str) -> Callable[..., FakeClient]:
+        """Return a stand-in for the ``SewClient`` constructor that records how it was called."""
+
+        def construct(*_args: Any, setup: bool = False, **_kwargs: Any) -> FakeClient:
+            self.constructed.append((where, setup))
+            return self
+
+        return construct
 
     async def async_login(self, username: str, password: str) -> LoginResult:
         """Record the credentials and return the scripted result."""
@@ -171,8 +183,8 @@ def fake_client() -> Iterator[FakeClient]:
     """Patch every place the integration constructs a client."""
     client = FakeClient()
     with (
-        patch("custom_components.sew_water.SewClient", return_value=client),
-        patch("custom_components.sew_water.config_flow.SewClient", return_value=client),
+        patch("custom_components.sew_water.SewClient", side_effect=client.factory("integration")),
+        patch("custom_components.sew_water.config_flow.SewClient", side_effect=client.factory("config_flow")),
         patch("custom_components.sew_water.config_flow.async_create_clientsession", return_value=client.session),
     ):
         yield client
@@ -183,9 +195,10 @@ def mock_config_entry() -> MockConfigEntry:
     """A version-2 entry as the config flow would have created it."""
     return MockConfigEntry(
         domain=DOMAIN,
-        title=USERNAME,
+        title=ENTRY_TITLE,
         unique_id=USERNAME,
         version=2,
+        minor_version=2,
         data={
             CONF_BILLING_ACCOUNT_ID: BILLING_ACCOUNT_ID,
             CONF_COOKIES: COOKIES,

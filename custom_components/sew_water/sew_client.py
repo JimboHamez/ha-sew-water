@@ -28,7 +28,7 @@ from http.cookies import SimpleCookie
 import json
 import logging
 import re
-from typing import Any, cast
+from typing import Any, NotRequired, TypedDict, cast
 from urllib.parse import unquote
 
 import aiohttp
@@ -45,11 +45,32 @@ APEX_USAGE_METHOD = "getUsageData"
 APEX_DISCOVERY_METHOD = "getBillingAccountsAndMetersForUser"
 AURA_APP_COMMUNITY = "siteforce:communityApp"
 AURA_APP_LOGIN = "siteforce:loginApp2"
+APEX_EXECUTE_DESCRIPTOR = "aura://ApexActionController/ACTION$execute"
 AURA_PATH = "/s/sfsites/aura"
+FRONTDOOR_PATH = "/secur/frontdoor.jsp"
 HOME_PATH = "/s/"
+LOGIN_DESCRIPTOR = "apex://cm_LoginAURA/ACTION$login"
 LOGIN_PATH = "/s/login/"
 MFA_FORM_PATH = "/PortalMFALoginFlow"
 MFA_PAGE_PATH = "/apex/PortalMFALoginFlow"
+
+# Every request the client may send or follow a redirect to, as (method, path); paths compare
+# case-insensitively. A polling client only loads the home page, which issues the Aura token and
+# doubles as the keep-alive, and posts Aura actions. Login and the MFA pages are for setup only.
+_POLL_REQUESTS = frozenset({("GET", HOME_PATH.casefold()), ("POST", AURA_PATH.casefold())})
+_SETUP_REQUESTS = _POLL_REQUESTS | {
+    ("GET", FRONTDOOR_PATH.casefold()),
+    ("GET", LOGIN_PATH.casefold()),
+    ("GET", MFA_PAGE_PATH.casefold()),
+    ("POST", MFA_FORM_PATH.casefold()),
+}
+# Every Aura action the client may send. Polling only fetches usage. Logging in and the account
+# lookup, whose response carries the customer's account records, are for setup only.
+_POLL_ACTIONS = frozenset({f"{APEX_USAGE_CLASSNAME}.{APEX_USAGE_METHOD}"})
+_SETUP_ACTIONS = _POLL_ACTIONS | {LOGIN_DESCRIPTOR, f"{APEX_USAGE_CLASSNAME}.{APEX_DISCOVERY_METHOD}"}
+# Redirects are followed by the client itself so that every hop is checked against the allowlist.
+_MAX_REDIRECTS = 10
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 MFA_CHANNEL_EMAIL = "Email"
 MFA_CHANNEL_SMS = "SMS"
@@ -121,6 +142,15 @@ class SewLoginUnexplainedError(SewProtocolError):
 
     The login action succeeded but returned no redirect and no rejection text, so the client cannot
     tell whether the credentials were wrong or the portal wants something else from this account.
+    """
+
+
+class SewRequestRefusedError(SewProtocolError):
+    """The client refused to send a request it does not need.
+
+    A polling client only loads the home page and fetches usage; login, MFA and the account lookup
+    need a client created with ``setup=True``. A redirect to any other page or site is refused too,
+    which to the caller looks like any other unexpected portal response.
     """
 
 
@@ -198,6 +228,31 @@ class DailyUsage:
     serial: str | None
     message: str | None
     available: bool
+
+
+class SewCookie(TypedDict):
+    """One portal cookie as stored by ``export_cookies`` and read by ``import_cookies``.
+
+    ``export_cookies`` always writes every key. Only ``name`` and ``value`` are required on import, so
+    a hand-written or older stored cookie still restores.
+
+    Attributes:
+        domain: Cookie domain; a leading dot marks a domain cookie.
+        expires: ``Expires`` attribute in HTTP-date form, or None for a session cookie.
+        httponly: True when the cookie carries the ``HttpOnly`` flag.
+        name: Cookie name.
+        path: Cookie path.
+        secure: True when the cookie carries the ``Secure`` flag.
+        value: Cookie value.
+    """
+
+    domain: NotRequired[str]
+    expires: NotRequired[str | None]
+    httponly: NotRequired[bool]
+    name: str
+    path: NotRequired[str]
+    secure: NotRequired[bool]
+    value: str
 
 
 @dataclass
@@ -360,23 +415,57 @@ def _redact(envelope: dict[str, Any]) -> str:
     return _SID_RE.sub(r"\1<redacted>", json.dumps(envelope, separators=(",", ":"))[:2000])
 
 
+def _action_name(action: dict[str, Any]) -> str:
+    """Name an Aura action for the allowlist: ``Class.method`` when run through ``ApexActionController``."""
+    descriptor = str(action.get("descriptor", ""))
+    if descriptor != APEX_EXECUTE_DESCRIPTOR:
+        return descriptor
+    params = action.get("params") or {}
+    return f"{params.get('classname')}.{params.get('method')}"
+
+
+def mask_identifier(value: str | None) -> str:
+    """Mask an account identifier for a log line, keeping only its last four characters.
+
+    Debug logs end up in public issue reports, and record IDs and meter serials identify the account.
+
+    Args:
+        value: The identifier, or None when the portal did not report one.
+
+    Returns:
+        ``***`` followed by the last four characters, ``***`` for a short value, or ``none``.
+    """
+    if not value:
+        return "none"
+    return f"***{value[-4:]}" if len(value) > 8 else "***"
+
+
 class SewClient:
     """Async client for the South East Water portal.
 
     The client owns no network resources; pass an ``aiohttp.ClientSession`` whose cookie jar will
     hold the portal session. Persist the jar between runs with ``export_cookies`` / ``import_cookies``
     so that MFA is only needed when the session finally expires.
+
+    Every request is checked against an allowlist before it is sent, and so is every redirect the
+    portal answers with. A polling client can only load the home page and fetch usage, so the
+    integration's day-to-day use of a session never reaches the portal's account or billing pages.
     """
 
-    def __init__(self, session: aiohttp.ClientSession, base_url: str = DEFAULT_BASE_URL) -> None:
+    def __init__(
+        self, session: aiohttp.ClientSession, base_url: str = DEFAULT_BASE_URL, *, setup: bool = False
+    ) -> None:
         """Create a client.
 
         Args:
             session: HTTP session; its cookie jar carries the portal login.
             base_url: Portal origin, without a trailing slash.
+            setup: Also allow the login, MFA and account-lookup requests that setting up or
+                re-authenticating needs. A client that only polls leaves this False.
         """
         self._session = session
         self._base = URL(base_url.rstrip("/"))
+        self._setup = setup
         self._context: AuraContext | None = None
         self._token: str | None = None
         self._mfa_form: _MfaForm | None = None
@@ -392,26 +481,74 @@ class SewClient:
         """Build an absolute portal URL."""
         return self._base.with_path(path, keep_query=False)
 
-    async def _request(self, method: str, url: URL | str, **kwargs: Any) -> tuple[aiohttp.ClientResponse, str]:
-        """Perform a request and return the response together with its body text.
+    def _check_request(self, method: str, url: URL, *, redirect: bool = False) -> None:
+        """Refuse a request, or a redirect to follow, that is not on this client's allowlist.
 
         Raises:
-            SewConnectionError: On network failure or a 5xx response.
+            SewAuthError: If the portal redirects to a login page this client does not load, as it
+                does for an expired session.
+            SewRequestRefusedError: If the request is not one this client needs.
+        """
+        allowed = _SETUP_REQUESTS if self._setup else _POLL_REQUESTS
+        same_site = url.is_absolute() and url.origin() == self._base.origin()
+        if same_site and (method, url.path.casefold()) in allowed:
+            return
+        if redirect and same_site and _AUTH_PATH_RE.search(url.path):
+            raise SewAuthError("Portal session is no longer valid")
+        # The query is left out because the frontdoor URL carries the session ID.
+        kind = "redirect" if redirect else "request"
+        raise SewRequestRefusedError(f"Refused {kind} to {method} {url.host}{url.path}")
+
+    def _check_actions(self, actions: list[dict[str, Any]]) -> None:
+        """Refuse Aura actions that are not on this client's allowlist.
+
+        Raises:
+            SewRequestRefusedError: If any action is not one this client needs.
+        """
+        allowed = _SETUP_ACTIONS if self._setup else _POLL_ACTIONS
+        for action in actions:
+            if (name := _action_name(action)) not in allowed:
+                raise SewRequestRefusedError(f"Refused Aura action {name}")
+
+    async def _request(self, method: str, url: URL | str, **kwargs: Any) -> tuple[aiohttp.ClientResponse, str]:
+        """Perform a request, following allowed redirects, and return the response with its body text.
+
+        Raises:
+            SewAuthError: If a redirect lands on a login page this client does not load.
+            SewConnectionError: On network failure, a 5xx response or a redirect loop.
+            SewRequestRefusedError: If the request or a redirect is not on the allowlist.
         """
         headers = {"User-Agent": USER_AGENT, **kwargs.pop("headers", {})}
+        url = URL(url)
+        self._check_request(method, url)
         try:
-            async with self._session.request(method, url, headers=headers, **kwargs) as resp:
-                text = await resp.text()
-                if resp.status in (429, 503):
-                    raise SewBusyError(
-                        f"Portal is busy (HTTP {resp.status}) for {resp.url.path}",
-                        retry_after=_retry_after_seconds(resp.headers.get("Retry-After")),
-                    )
-                if resp.status >= 500:
-                    raise SewConnectionError(f"Portal returned HTTP {resp.status} for {resp.url.path}")
-                return resp, text
+            for _ in range(_MAX_REDIRECTS + 1):
+                async with self._session.request(method, url, headers=headers, allow_redirects=False, **kwargs) as resp:
+                    location = resp.headers.get("Location") if resp.status in _REDIRECT_STATUSES else None
+                    if location is None:
+                        text = await resp.text()
+                        if resp.status in (429, 503):
+                            raise SewBusyError(
+                                f"Portal is busy (HTTP {resp.status}) for {resp.url.path}",
+                                retry_after=_retry_after_seconds(resp.headers.get("Retry-After")),
+                            )
+                        if resp.status >= 500:
+                            raise SewConnectionError(f"Portal returned HTTP {resp.status} for {resp.url.path}")
+                        return resp, text
+                target = url.join(URL(location))
+                if resp.status not in (307, 308):
+                    # Like a browser, a 301, 302 or 303 is followed with a GET and no body.
+                    method = "GET"
+                    kwargs.pop("data", None)
+                self._check_request(method, target, redirect=True)
+                _LOGGER.debug("Following a redirect from %s to %s", url.path, target.path)
+                url = target
         except aiohttp.ClientError as err:
-            raise SewConnectionError(f"Request to portal failed: {err}") from err
+            # Some aiohttp errors quote the full URL, and the frontdoor URL carries the session ID.
+            detail = _SID_RE.sub(r"\1<redacted>", str(err))
+            raise SewConnectionError(f"Request to portal failed: {detail}") from err
+        # aiohttp reports a redirect loop as a connection error, so a retry follows rather than a reauth.
+        raise SewConnectionError(f"Portal redirected more than {_MAX_REDIRECTS} times")
 
     async def _aura(
         self,
@@ -452,7 +589,9 @@ class SewClient:
             SewAuthError: If the session is invalid.
             SewBusyError: If the portal is throttling.
             SewProtocolError: If the response is not an Aura envelope.
+            SewRequestRefusedError: If an action is not on this client's allowlist.
         """
+        self._check_actions(actions)
         message = {"actions": [{"id": f"{i + 1};a", **action} for i, action in enumerate(actions)]}
         data = {
             "aura.context": json.dumps(context.as_payload(), separators=(",", ":")),
@@ -543,7 +682,12 @@ class SewClient:
         Returns:
             True when the page is the logged-in home page, False when it bounced to authentication.
         """
-        resp, page = await self._request("GET", self._url(HOME_PATH))
+        try:
+            resp, page = await self._request("GET", self._url(HOME_PATH))
+        except SewAuthError:
+            # A polling client stops at the redirect to the login page instead of loading it.
+            self._token = None
+            return False
         return self._absorb_home(resp, page)
 
     def _absorb_home(self, resp: aiohttp.ClientResponse, page: str) -> bool:
@@ -569,12 +713,7 @@ class SewClient:
             raise SewProtocolError("Home page did not issue an Aura token")
         self._token = token_cookie.value
         self._context = _parse_aura_context(page, AURA_APP_COMMUNITY)
-        _LOGGER.debug(
-            "Home page loaded from %s via %s; Aura token from the %s cookie",
-            resp.url.path,
-            [r.url.path for r in resp.history] or "no redirects",
-            source,
-        )
+        _LOGGER.debug("Home page loaded from %s; Aura token from the %s cookie", resp.url.path, source)
         return True
 
     async def _ensure_home(self) -> tuple[AuraContext, str]:
@@ -613,7 +752,7 @@ class SewClient:
         login_ctx = _parse_aura_context(login_page, AURA_APP_LOGIN)
         action = {
             "callingDescriptor": "UNKNOWN",
-            "descriptor": "apex://cm_LoginAURA/ACTION$login",
+            "descriptor": LOGIN_DESCRIPTOR,
             "params": {"password": password, "startUrl": "/", "username": username},
         }
         envelope = await self._aura_envelope([action], login_ctx, None, LOGIN_PATH)
@@ -730,14 +869,14 @@ class SewClient:
 
     # ------------------------------------------------------------------ session
 
-    def export_cookies(self) -> list[dict[str, Any]]:
+    def export_cookies(self) -> list[SewCookie]:
         """Serialise the portal cookies so the session can be restored later.
 
         Returns:
             A JSON-serialisable list, one entry per cookie.
         """
         host = self._base.host or ""
-        cookies: list[dict[str, Any]] = []
+        cookies: list[SewCookie] = []
         for morsel in self._session.cookie_jar:
             domain = morsel["domain"] or host
             if not (domain.lstrip(".") == host or host.endswith(domain.lstrip("."))):
@@ -755,7 +894,7 @@ class SewClient:
             )
         return cookies
 
-    def import_cookies(self, cookies: list[dict[str, Any]]) -> None:
+    def import_cookies(self, cookies: list[SewCookie]) -> None:
         """Restore cookies previously produced by ``export_cookies``.
 
         Args:
@@ -836,7 +975,7 @@ class SewClient:
             raise SewProtocolError(f"No digital meter found for the {len(accounts)} billing account(s) on this login")
         account, meter = candidates[0]
         if len(candidates) > 1:
-            # Identifiers stay out of the info line; the debug line lists them so the choice can be checked.
+            # Identifiers stay out of the info line; the debug line lists them masked so the choice can be checked.
             _LOGGER.info(
                 "Found %d digital meters across %d billing account(s); using the first the portal lists",
                 len(candidates),
@@ -844,8 +983,8 @@ class SewClient:
             )
             _LOGGER.debug(
                 "Digital meter serials in portal order: %s; using %s",
-                [m.get("Name") for _, m in candidates],
-                meter.get("Name"),
+                [mask_identifier(m.get("Name")) for _, m in candidates],
+                mask_identifier(meter.get("Name")),
             )
         serial = meter.get("Name")
         return AccountIds(
@@ -868,7 +1007,7 @@ class SewClient:
             action_params["params"] = params
         return {
             "callingDescriptor": "UNKNOWN",
-            "descriptor": "aura://ApexActionController/ACTION$execute",
+            "descriptor": APEX_EXECUTE_DESCRIPTOR,
             "params": action_params,
         }
 
