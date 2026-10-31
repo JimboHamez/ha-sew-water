@@ -35,7 +35,13 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.2.3
+## 🆕 What's new in v2.2.4
+
+- **Ready for Home Assistant 2026.11** (tested on its beta; no changes were needed). HACS is now the built-in Marketplace. New installs use **Settings → Marketplace → Add from link** ([steps](#marketplace-recommended-home-assistant-202611-or-newer)); installs made through HACS move across on their own.
+- **General privacy and hardening improvements.**
+- **The integration entry is now titled *South East Water*.** Existing entries are renamed on update unless you've given yours a different name.
+
+From v2.2.3:
 
 - **Re-login instead of a setup loop** ([#10](https://github.com/JimboHamez/ha-sew-water/issues/10)). When the portal stops letting a stored session read usage data, the *Reauthentication required* card now asks for a new one-time code. Before, setup retried indefinitely with *You do not have access to the Apex class named 'MysewUsageBillingGraphController'* until the integration was removed and added again.
 
@@ -61,7 +67,7 @@ From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/Ji
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.3).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.2.4).
 
 ---
 
