@@ -34,7 +34,7 @@ Separate every top-level section with a `---` horizontal rule.
 
 - `# <Integration name>` as the H1.
 - **Badge block**, two rows, in this order:
-  1. Status/meta shields (`style=for-the-badge`): HACS, GitHub Release, downloads,
+  1. Status/meta shields (`style=for-the-badge`): Marketplace (links to the install steps), GitHub Release, downloads,
      license, commit activity, maintenance year.
   2. Workflow status badges (Tests, Validate, hassfest) — add each one when its
      workflow exists under `.github/workflows/`.
@@ -79,7 +79,10 @@ Use `<details><summary>…</summary>` for long optional snippets so the section 
   ![South East Water sensors in Home Assistant](images/dashboard.png)
   ```
 
-- `### HACS (recommended)` numbered steps.
+- `### Marketplace (recommended, Home Assistant 2026.11 or newer)` numbered steps (Add from link; the
+  repository isn't in the catalog), the 48-hour update check, and a note that HACS installs move over on
+  their own.
+- `### HACS (Home Assistant 2026.10 or older)` numbered steps.
 - `### Manual` numbered steps.
 - `### Removing the integration` — what is deleted and what is deliberately left behind
   (the `sew_water:water_usage_mains` statistic).

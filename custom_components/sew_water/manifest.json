@@ -1,6 +1,9 @@
 {
   "domain": "sew_water",
   "name": "South East Water",
+  "categories": [
+    "water.meters_leak_detection"
+  ],
   "codeowners": [
     "@JimboHamez"
   ],
@@ -14,5 +17,5 @@
   "issue_tracker": "https://github.com/JimboHamez/ha-sew-water/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "2.2.3"
+  "version": "2.2.4b1"
 }

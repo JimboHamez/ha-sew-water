@@ -8,6 +8,8 @@ DOMAIN: Final = "sew_water"
 
 ATTRIBUTION: Final = "Data provided by South East Water"
 MANUFACTURER: Final = "South East Water"
+# Config entry title. Not the login email, because Home Assistant writes entry titles into its logs.
+ENTRY_TITLE: Final = "South East Water"
 
 # Config-entry data keys (username/password use homeassistant.const).
 CONF_BILLING_ACCOUNT_ID: Final = "billing_account_id"

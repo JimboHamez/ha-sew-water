@@ -13,6 +13,8 @@ from .const import CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_ME
 from .coordinator import SewConfigEntry
 
 TO_REDACT = {CONF_BILLING_ACCOUNT_ID, CONF_COOKIES, CONF_METER_ID, CONF_METER_SERIAL, CONF_PASSWORD, CONF_USERNAME}
+# The meter serial the portal attributes each day's readings to.
+TO_REDACT_USAGE = {"serial"}
 
 
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SewConfigEntry) -> dict[str, Any]:
@@ -26,7 +28,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: SewConf
         },
         "coordinator": {
             "last_poll": data.last_poll.isoformat() if data else None,
-            "latest": asdict(data.latest) if data and data.latest else None,
+            "latest": async_redact_data(asdict(data.latest), TO_REDACT_USAGE) if data and data.latest else None,
             "total_litres": data.total_litres if data else None,
             "update_interval": str(coordinator.update_interval),
             "window_days": len(data.window) if data else 0,

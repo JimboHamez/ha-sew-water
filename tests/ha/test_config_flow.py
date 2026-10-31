@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.sew_water.config_flow import mask_email
 from custom_components.sew_water.const import (
     CONF_BILLING_ACCOUNT_ID,
     CONF_COOKIES,
@@ -24,6 +25,7 @@ from custom_components.sew_water.const import (
     CONF_POLL_TIME,
     CONF_SCAN_INTERVAL,
     DOMAIN,
+    ENTRY_TITLE,
 )
 from custom_components.sew_water.sew_client import (
     LoginResult,
@@ -67,6 +69,7 @@ async def submit(hass: HomeAssistant, flow_id: str, user_input: dict[str, Any] |
 async def test_full_flow_creates_entry(hass: HomeAssistant, fake_client: FakeClient) -> None:
     result = await start_user_flow(hass)
     result = await submit(hass, result["flow_id"], CREDENTIALS)
+    assert fake_client.constructed == [("config_flow", True)]
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "mfa_channel"
 
@@ -80,7 +83,7 @@ async def test_full_flow_creates_entry(hass: HomeAssistant, fake_client: FakeCli
 
     result = await submit(hass, result["flow_id"], {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == USERNAME
+    assert result["title"] == ENTRY_TITLE
     assert result["data"] == {
         CONF_BILLING_ACCOUNT_ID: BILLING_ACCOUNT_ID,
         CONF_COOKIES: COOKIES,
@@ -277,7 +280,7 @@ async def start_reauth(hass: HomeAssistant, entry: MockConfigEntry) -> dict[str,
     result = await entry.start_reauth_flow(hass)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reauth_confirm"
-    assert result["description_placeholders"][CONF_USERNAME] == USERNAME
+    assert result["description_placeholders"][CONF_USERNAME] == "u***@example.com"
     return dict(result)
 
 
@@ -307,7 +310,7 @@ async def test_reauth_with_rejected_password_asks_for_a_new_one(
     result = await submit(hass, result["flow_id"], {})
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reauth_password"
-    assert result["description_placeholders"][CONF_USERNAME] == USERNAME
+    assert result["description_placeholders"][CONF_USERNAME] == "u***@example.com"
 
     # Wrong again: stays on the password step with the error shown.
     result = await submit(hass, result["flow_id"], {CONF_PASSWORD: "still-wrong"})
@@ -438,3 +441,11 @@ async def test_options_flow_sets_scan_interval_and_poll_time(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert setup_integration.options == {CONF_POLL_TIME: "10:30:00", CONF_SCAN_INTERVAL: 360}
     assert setup_integration.state is config_entries.ConfigEntryState.LOADED
+
+
+@pytest.mark.parametrize(
+    ("address", "masked"),
+    [("user@example.com", "u***@example.com"), ("a@b.co", "a***@b.co"), ("no-domain", "***"), ("@example.com", "***")],
+)
+def test_mask_email(address: str, masked: str) -> None:
+    assert mask_email(address) == masked

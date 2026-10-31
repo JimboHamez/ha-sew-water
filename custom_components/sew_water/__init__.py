@@ -7,7 +7,7 @@ import logging
 
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
@@ -21,12 +21,13 @@ import voluptuous as vol
 from .const import (
     CONF_COOKIES,
     DOMAIN,
+    ENTRY_TITLE,
     SERVICE_ATTR_START_DATE,
     SERVICE_FORCE_IMPORT,
     SERVICE_IMPORT_FROM_DATE,
 )
 from .coordinator import SewConfigEntry, SewCoordinator
-from .sew_client import SewClient
+from .sew_client import SewClient, mask_identifier
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,13 +79,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: SewConfigEntry) -> bool:
     client.import_cookies(entry.data.get(CONF_COOKIES, []))
 
     coordinator = SewCoordinator(hass, entry, client)
-    # Identifiers are account data, so they are not exposed as entities; they can be checked here
-    # with debug logging enabled.
+    # Identifiers are account data, so they are not exposed as entities; with debug logging enabled
+    # their last characters can be checked here.
     _LOGGER.debug(
         "Using billing account %s, meter %s (serial %s)",
-        coordinator.ids.billing_account_id,
-        coordinator.ids.meter_id,
-        coordinator.ids.meter_serial,
+        mask_identifier(coordinator.ids.billing_account_id),
+        mask_identifier(coordinator.ids.meter_id),
+        mask_identifier(coordinator.ids.meter_serial),
     )
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
@@ -101,7 +102,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: SewConfigEntry) -> bool
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Refuse to migrate version 1 entries; they hold no session and must be set up again."""
+    """Migrate an older config entry.
+
+    Version 1 entries hold no session and must be set up again, so they are refused. Version 2.1
+    entries are renamed from the login email to a fixed title, because Home Assistant writes entry
+    titles into its own log lines; a title the user chose is kept.
+    """
     if entry.version < 2:
         ir.async_create_issue(
             hass,
@@ -115,4 +121,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
         _LOGGER.error("Config entries from version 1 cannot be migrated; remove the integration and add it again")
         return False
+    if entry.version == 2 and entry.minor_version < 2:
+        username = str(entry.data.get(CONF_USERNAME, ""))
+        title = ENTRY_TITLE if entry.title.casefold() == username.casefold() else entry.title
+        hass.config_entries.async_update_entry(entry, title=title, minor_version=2)
+        _LOGGER.debug("Migrated config entry to version 2.2")
     return True

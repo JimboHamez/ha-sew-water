@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # Workflow actions are pinned to commit SHAs. Dependabot bumps the SHA and the version comment beside it.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # One PR per week for all action bumps instead of one per action.
+      github-actions:
+        patterns:
+          - "*"
+    ignore:
+      # These are pinned to a branch head because their last releases are far behind. Dependabot would "update" them
+      # back to those old releases, so bump these SHAs by hand.
+      - dependency-name: aquasecurity/trivy-action
+      - dependency-name: hacs/action
+      - dependency-name: home-assistant/actions*
+
+  # Test and lint dependencies in requirements_test.txt. The integration bundles its client, so manifest.json has none.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python-test-deps:
+        patterns:
+          - "*"
