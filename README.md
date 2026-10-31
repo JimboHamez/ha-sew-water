@@ -1,8 +1,8 @@
 # South East Water
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![marketplace_badge](https://img.shields.io/badge/Marketplace-Custom-41BDF5.svg?style=for-the-badge)](#marketplace-recommended-home-assistant-202611-or-newer)
 ![GitHub Release](https://img.shields.io/github/v/release/JimboHamez/ha-sew-water?style=for-the-badge)
-[![hacs_downloads](https://img.shields.io/github/downloads/JimboHamez/ha-sew-water/latest/total?style=for-the-badge)](https://github.com/JimboHamez/ha-sew-water/releases/latest)
+[![downloads](https://img.shields.io/github/downloads/JimboHamez/ha-sew-water/latest/total?style=for-the-badge)](https://github.com/JimboHamez/ha-sew-water/releases/latest)
 ![GitHub License](https://img.shields.io/github/license/JimboHamez/ha-sew-water?style=for-the-badge)
 ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/JimboHamez/ha-sew-water?style=for-the-badge)
 ![Maintenance](https://img.shields.io/maintenance/yes/2026?style=for-the-badge)

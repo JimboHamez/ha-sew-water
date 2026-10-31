@@ -34,7 +34,7 @@ Separate every top-level section with a `---` horizontal rule.
 
 - `# <Integration name>` as the H1.
 - **Badge block**, two rows, in this order:
-  1. Status/meta shields (`style=for-the-badge`): HACS, GitHub Release, downloads,
+  1. Status/meta shields (`style=for-the-badge`): Marketplace (links to the install steps), GitHub Release, downloads,
      license, commit activity, maintenance year.
   2. Workflow status badges (Tests, Validate, hassfest) — add each one when its
      workflow exists under `.github/workflows/`.
