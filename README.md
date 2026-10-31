@@ -90,7 +90,19 @@ Only needed if you want the water card on the Energy dashboard. Nothing to set u
 ![South East Water sensors in Home Assistant](images/dashboard.png)
 <!-- placeholder: capture the device page showing the three sensors -->
 
-### HACS (recommended)
+### Marketplace (recommended, Home Assistant 2026.11 or newer)
+
+Home Assistant 2026.11 replaces HACS with the built-in Marketplace. South East Water isn't in the Marketplace catalog, so add it from its link:
+
+1. **Settings → Marketplace** → **Add from link**. The first time, accept the Marketplace's warning.
+2. Under **GitHub link**, enter `JimboHamez/ha-sew-water` and select **Add**. If you haven't connected GitHub yet, the Marketplace asks you to; the connection only reads public information.
+3. Install **South East Water**. Setup starts straight away, without a restart.
+
+Repositories added from a link are checked for updates every 48 hours, so a new release can take up to two days to appear under **Settings → Updates**.
+
+**Already installed through HACS?** Nothing to do. Updating Home Assistant to 2026.11 moves it to the Marketplace, and it keeps getting updates.
+
+### HACS (Home Assistant 2026.10 or older)
 
 1. HACS → Integrations → ⋮ → **Custom repositories**.
 2. Add `https://github.com/JimboHamez/ha-sew-water` as type **Integration**.
@@ -105,7 +117,7 @@ Only needed if you want the water card on the Energy dashboard. Nothing to set u
 ### Removing the integration
 
 1. **Settings → Devices & Services → South East Water** → ⋮ → **Delete**. This removes the config entry, the stored session and every entity it created.
-2. If installed via HACS, HACS → **South East Water** → ⋮ → **Remove**; for a manual install delete `config/custom_components/sew_water/`.
+2. Remove the files. Marketplace: **Settings → Marketplace** → **South East Water** → remove it. HACS: HACS → **South East Water** → ⋮ → **Remove**. Manual install: delete `config/custom_components/sew_water/`.
 3. Restart Home Assistant.
 
 One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
@@ -386,12 +398,12 @@ Credentials are stored in the config entry — Home Assistant's private `.storag
 
 This integration is measured against Home Assistant's [Integration Quality Scale](https://developers.home-assistant.io/docs/core/integration-quality-scale/checklist) — the checklist core integrations are held to, covering setup, entity naming, documentation, typing and test coverage. The rule-by-rule record is in [`quality_scale.yaml`](custom_components/sew_water/quality_scale.yaml).
 
-**This is a self-assessment, not an awarded tier.** The quality scale is a programme for integrations that ship inside Home Assistant Core; a custom/HACS integration like this one is not eligible for an official rating. We audit against the published rules anyway, so you can see what has and hasn't been done rather than take "custom integration" on trust.
+**This is a self-assessment, not an awarded tier.** The quality scale is a programme for integrations that ship inside Home Assistant Core; a custom integration like this one is not eligible for an official rating. We audit against the published rules anyway, so you can see what has and hasn't been done rather than take "custom integration" on trust.
 
 > [!NOTE]
 > **No tier is claimed.** One Bronze rule, `dependency-transparency`, is not met. Home Assistant expects the code that talks to a service to live in a **separate library, published to PyPI** from a public CI pipeline and declared in `manifest.json` `requirements`. Here the portal client is bundled in the integration as [`sew_client.py`](custom_components/sew_water/sew_client.py). Every tier includes Bronze, so with this rule open no tier can be claimed. The same choice leaves the Platinum rule `async-dependency` open; every other applicable rule passes.
 >
-> Bundling the client is deliberate. The rule exists so Home Assistant Core can version a dependency independently of the integration that uses it; this integration ships as one unit through HACS, and the client exists for exactly one portal with no other consumer. Splitting it would add a second repository, a second release cadence and a compatibility surface between them, with nothing a user would notice. The client has no Home Assistant imports and its own test suite, so it can be split out later if that changes.
+> Bundling the client is deliberate. The rule exists so Home Assistant Core can version a dependency independently of the integration that uses it; this integration ships as one unit through the Marketplace or HACS, and the client exists for exactly one portal with no other consumer. Splitting it would add a second repository, a second release cadence and a compatibility surface between them, with nothing a user would notice. The client has no Home Assistant imports and its own test suite, so it can be split out later if that changes.
 
 **Bronze — 16 of 17 applicable rules pass; `dependency-transparency` is open (see above).** Setup runs entirely through the UI, `config_flow.py` is fully covered by tests, entities carry unique IDs and take their names from translations, the coordinator lives on `entry.runtime_data`, both actions (`force_import` and `import_from_date`) are registered at startup, and the portal login is exercised before an entry is created and again before setup completes. Three Bronze rules don't apply: `docs-triggers` and `docs-conditions` (this integration provides neither), and `entity-event-setup` (entities read the coordinator and subscribe to nothing else).
 
