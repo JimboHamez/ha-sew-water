@@ -3,6 +3,17 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- README install steps for the Marketplace, which replaces HACS in Home Assistant 2026.11: add the
+  integration with **Settings → Marketplace → Add from link**. Installs made through HACS move to the
+  Marketplace on their own when Home Assistant updates. The HACS steps stay for 2026.10 and older, and the
+  removal steps cover both.
+
+### Changed
+- The README's HACS badge is now a Marketplace badge that links to the install steps.
+
 ## [2.2.4b1] — 2026-10-30
 
 Beta. Everyone not testing it should stay on 2.2.3.
