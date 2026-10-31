@@ -23,6 +23,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # The test harness pins exact versions, so raising every minimum to the latest release can't install. Only open a
+    # PR when a new release falls outside the allowed range, such as the pytest-homeassistant-custom-component cap.
+    versioning-strategy: increase-if-necessary
     groups:
       python-test-deps:
         patterns:
