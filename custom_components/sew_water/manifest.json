@@ -1,6 +1,9 @@
 {
   "domain": "sew_water",
   "name": "South East Water",
+  "categories": [
+    "water.meters_leak_detection"
+  ],
   "codeowners": [
     "@JimboHamez"
   ],
