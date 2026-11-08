@@ -26,6 +26,7 @@ from sew_client import (  # loaded from file by conftest.py, without importing t
     SewProtocolError,
     SewRequestRefusedError,
     mask_identifier,
+    meter_kind,
 )
 
 from .conftest import (
@@ -442,12 +443,14 @@ async def test_discover_ids_with_two_digital_meters_on_one_property_uses_the_fir
         ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
     (info_line,) = debug_lines(info)
-    assert info_line == "Found 2 digital meters across 1 billing account(s); using the first the portal lists"
+    assert info_line == (
+        "Found 2 digital meters across 1 billing account(s); using the first account's 2 mains and 0 recycled meter(s)"
+    )
     # Serials are identifiers, so they appear only at debug level.
     assert METER_SERIAL not in info_line and "SAHL999999" not in info_line
     # Even at debug level they are masked to their last four characters.
     debug_text = "\n".join(debug_lines(debug))
-    assert "['***0000', '***9999']; using ***0000" in debug_text
+    assert "['***0000', '***9999']; using ['***0000 (mains)', '***9999 (mains)']" in debug_text
     assert METER_SERIAL not in debug_text and "SAHL999999" not in debug_text
 
 
@@ -462,7 +465,9 @@ async def test_discover_ids_with_a_digital_meter_on_each_account_uses_the_first_
     with patch.object(sew_client._LOGGER, "info") as info:
         ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
-    assert debug_lines(info) == ["Found 2 digital meters across 2 billing account(s); using the first the portal lists"]
+    assert debug_lines(info) == [
+        "Found 2 digital meters across 2 billing account(s); using the first account's 1 mains and 0 recycled meter(s)"
+    ]
 
 
 async def test_discover_ids_accepts_json_strings_and_missing_serial(client: SewClient, mocked: aioresponses) -> None:
@@ -474,6 +479,78 @@ async def test_discover_ids_accepts_json_strings_and_missing_serial(client: SewC
     mocked.post(AURA_URL, status=200, payload=aura_envelope(json.dumps(value)))
     ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=None)
+
+
+RECYCLED_METER_ID = "a1K90000000RRRREAC"
+RECYCLED_SERIAL = "RAHA000000"
+MAINS = AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL, kind="mains")
+RECYCLED = AccountIds(
+    billing_account_id=BILLING_ACCOUNT_ID, meter_id=RECYCLED_METER_ID, meter_serial=RECYCLED_SERIAL, kind="recycled"
+)
+
+
+@pytest.mark.parametrize(
+    ("serial", "kind"),
+    [
+        ("RAHA000000", "recycled"),
+        ("raha000000", "recycled"),
+        (" RAHA000000", "recycled"),
+        ("SAHA000000", "mains"),
+        ("12345678", "mains"),
+        ("", "mains"),
+        (None, "mains"),
+    ],
+)
+def test_meter_kind_classifies_by_serial_prefix(serial: str | None, kind: str) -> None:
+    assert meter_kind(serial) == kind
+
+
+def test_account_ids_default_to_mains() -> None:
+    """Identifiers built without a kind, as before recycled meters were recognised, are mains."""
+    assert IDS.kind == "mains"
+
+
+async def test_discovery_with_recycled_meter_listed_first_returns_mains(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    """The portal listed the recycled meter first in a real capture; discovery must still pick the mains meter."""
+    mock_home(mocked)
+    meters = [meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL), meter_record()]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
+    with patch.object(sew_client._LOGGER, "info") as info, patch.object(sew_client._LOGGER, "debug") as debug:
+        ids = await client.async_discover_ids()
+    assert ids == MAINS
+    assert debug_lines(info) == [
+        "Found 2 digital meters across 1 billing account(s); using the first account's 1 mains and 1 recycled meter(s)"
+    ]
+    debug_text = "\n".join(debug_lines(debug))
+    assert "['***0000', '***0000']; using ['***0000 (mains)', '***0000 (recycled)']" in debug_text
+    assert METER_SERIAL not in debug_text and RECYCLED_SERIAL not in debug_text
+
+
+async def test_discover_meters_returns_both_mains_first(client: SewClient, mocked: aioresponses) -> None:
+    mock_home(mocked)
+    meters = [
+        meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL),
+        meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, serial="SAHL999999"),
+        meter_record(),
+    ]
+    accounts = [account_record(), account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID)]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    # The second account's meter is not on the chosen account, so it is left out.
+    assert await client.async_discover_meters() == [MAINS, RECYCLED]
+
+
+async def test_discover_ids_without_a_mains_meter_falls_back_to_the_first(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    mock_home(mocked)
+    meters = [meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL)]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
+    with patch.object(sew_client._LOGGER, "info") as info:
+        ids = await client.async_discover_ids()
+    assert ids == RECYCLED
+    assert debug_lines(info) == ["No mains meter found on the billing account; using the recycled meter"]
 
 
 async def test_discover_ids_without_accounts_is_protocol_error(client: SewClient, mocked: aioresponses) -> None:
@@ -978,6 +1055,24 @@ async def test_poll_client_refuses_the_account_lookup(poll_client: SewClient, mo
     ):
         await poll_client.async_discover_ids()
     assert requested_paths(mocked) == ["/s/"]
+
+
+async def test_discovery_client_may_list_meters(session: aiohttp.ClientSession, mocked: aioresponses) -> None:
+    """The upgrade client sends the account lookup on an existing session."""
+    discovery_client = SewClient(session, BASE, discovery=True)
+    mock_home(mocked)
+    meters = [meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL), meter_record()]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
+    assert await discovery_client.async_discover_meters() == [MAINS, RECYCLED]
+    assert requested_paths(mocked) == ["/s/", "/s/sfsites/aura"]
+
+
+async def test_discovery_client_refuses_login(session: aiohttp.ClientSession, mocked: aioresponses) -> None:
+    """Listing meters does not widen the client to the login and MFA pages."""
+    discovery_client = SewClient(session, BASE, discovery=True)
+    with pytest.raises(SewRequestRefusedError, match="Refused request to GET my.southeastwater.com.au/s/login/"):
+        await discovery_client.async_login("user@example.com", "hunter2")
+    assert requested_paths(mocked) == []
 
 
 async def test_poll_client_fetches_usage(poll_client: SewClient, mocked: aioresponses) -> None:
