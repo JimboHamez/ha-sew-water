@@ -20,12 +20,24 @@ from custom_components.sew_water.const import (
     CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
+    CONF_METERS,
     DOMAIN,
     ISSUE_BACKFILL_FAILED,
 )
+from custom_components.sew_water.coordinator import meters_to_data
 from custom_components.sew_water.sew_client import SewConnectionError
 
-from .conftest import BACKFILL_DAYS, BILLING_ACCOUNT_ID, COOKIES, METER_ID, METER_SERIAL, PASSWORD, USERNAME, FakeClient
+from .conftest import (
+    BACKFILL_DAYS,
+    BILLING_ACCOUNT_ID,
+    COOKIES,
+    IDS,
+    METER_ID,
+    METER_SERIAL,
+    PASSWORD,
+    USERNAME,
+    FakeClient,
+)
 
 TOTAL = "sensor.south_east_water_total_usage"
 
@@ -43,6 +55,7 @@ def entry_with_history(start: date) -> MockConfigEntry:
             CONF_IMPORT_FROM: start.isoformat(),
             CONF_METER_ID: METER_ID,
             CONF_METER_SERIAL: METER_SERIAL,
+            CONF_METERS: meters_to_data([IDS]),
             "password": PASSWORD,
             "username": USERNAME,
         },

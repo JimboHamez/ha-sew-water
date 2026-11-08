@@ -23,9 +23,11 @@ from custom_components.sew_water.const import (
     CONF_COOKIES,
     CONF_METER_ID,
     CONF_METER_SERIAL,
+    CONF_METERS,
     DOMAIN,
     ENTRY_TITLE,
 )
+from custom_components.sew_water.coordinator import meters_to_data
 from custom_components.sew_water.sew_client import AccountIds, DailyUsage, LoginResult
 
 USERNAME = "user@example.com"
@@ -36,19 +38,25 @@ METER_SERIAL = "SAHL000000"
 COOKIES = [{"name": "sid", "value": "SESSION", "domain": "my.southeastwater.com.au", "path": "/"}]
 REFRESHED_COOKIES = [{"name": "sid", "value": "SESSION-2", "domain": "my.southeastwater.com.au", "path": "/"}]
 IDS = AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
+# The property's recycled-water meter, which the portal can list before the mains meter.
+RECYCLED_METER_ID = "a1K90000000RRRREAC"
+RECYCLED_SERIAL = "RAHA000000"
+RECYCLED_IDS = AccountIds(
+    billing_account_id=BILLING_ACCOUNT_ID, meter_id=RECYCLED_METER_ID, meter_serial=RECYCLED_SERIAL, kind="recycled"
+)
 # Import windows used in tests; the real 90/30-day windows would write thousands of hourly rows per test.
 BACKFILL_DAYS = 6
 TRAILING_WINDOW_DAYS = 3
 
 
-def usage_for(day: date, litres_per_hour: int = 10) -> DailyUsage:
+def usage_for(day: date, litres_per_hour: int = 10, serial: str | None = METER_SERIAL) -> DailyUsage:
     """Build a day with 24 equal hourly readings."""
     readings = tuple([litres_per_hour] * 24)
     return DailyUsage(
         day=day,
         litres=sum(readings),
         readings=readings,
-        serial=METER_SERIAL,
+        serial=serial,
         message="Ok",
         available=bool(litres_per_hour),
     )
@@ -67,11 +75,17 @@ class FakeClient:
         self.alive_error: Exception | None = None
         self.fetch_error: Exception | None = None
         self.ids = IDS
+        # What async_discover_meters returns, already in the client's mains-first order.
+        self.meters: list[AccountIds] = [IDS]
         self.exported_cookies: list[dict[str, Any]] = list(COOKIES)
         self.imported_cookies: list[dict[str, Any]] | None = None
         self.litres_per_hour: Callable[[date], int] = lambda _day: 10
+        # Per-serial overrides of litres_per_hour, for tests with two meters.
+        self.litres_per_hour_by_serial: dict[str | None, Callable[[date], int]] = {}
         self.calls: list[tuple[str, Any]] = []
         self.fetch_ranges: list[tuple[date, date]] = []
+        # Every usage fetch as (meter serial, first day, last day).
+        self.fetches: list[tuple[str | None, date, date]] = []
         self.session = _FakeSession()
         # Where each client was constructed and whether it was a setup client.
         self.constructed: list[tuple[str, bool]] = []
@@ -79,8 +93,8 @@ class FakeClient:
     def factory(self, where: str) -> Callable[..., FakeClient]:
         """Return a stand-in for the ``SewClient`` constructor that records how it was called."""
 
-        def construct(*_args: Any, setup: bool = False, **_kwargs: Any) -> FakeClient:
-            self.constructed.append((where, setup))
+        def construct(*_args: Any, setup: bool = False, discovery: bool = False, **_kwargs: Any) -> FakeClient:
+            self.constructed.append((f"{where}-discovery" if discovery else where, setup))
             return self
 
         return construct
@@ -111,6 +125,13 @@ class FakeClient:
             raise self.discover_error
         return self.ids
 
+    async def async_discover_meters(self) -> list[AccountIds]:
+        """Return the scripted meters."""
+        self.calls.append(("discover_meters", None))
+        if self.discover_error:
+            raise self.discover_error
+        return list(self.meters)
+
     def export_cookies(self) -> list[dict[str, Any]]:
         """Return the scripted cookie jar."""
         return list(self.exported_cookies)
@@ -130,13 +151,12 @@ class FakeClient:
         """Return one day per date in the range."""
         self.calls.append(("fetch_usage", (date_from, date_to)))
         self.fetch_ranges.append((date_from, date_to))
+        self.fetches.append((ids.meter_serial, date_from, date_to))
         if self.fetch_error:
             raise self.fetch_error
-        days = (date_to - date_from).days + 1
-        return [
-            usage_for(date_from + timedelta(days=n), self.litres_per_hour(date_from + timedelta(days=n)))
-            for n in range(days)
-        ]
+        litres = self.litres_per_hour_by_serial.get(ids.meter_serial, self.litres_per_hour)
+        days = [date_from + timedelta(days=n) for n in range((date_to - date_from).days + 1)]
+        return [usage_for(day, litres(day), ids.meter_serial) for day in days]
 
 
 class _FakeSession:
@@ -190,23 +210,32 @@ def fake_client() -> Iterator[FakeClient]:
         yield client
 
 
+def entry_data(meters: list[AccountIds] | None = None, **extra: Any) -> dict[str, Any]:
+    """Build entry data as the config flow stores it; ``meters=None`` gives a pre-2.3 entry without the list."""
+    data: dict[str, Any] = {
+        CONF_BILLING_ACCOUNT_ID: BILLING_ACCOUNT_ID,
+        CONF_COOKIES: COOKIES,
+        CONF_METER_ID: METER_ID,
+        CONF_METER_SERIAL: METER_SERIAL,
+        CONF_PASSWORD: PASSWORD,
+        CONF_USERNAME: USERNAME,
+        **extra,
+    }
+    if meters is not None:
+        data[CONF_METERS] = meters_to_data(meters)
+    return data
+
+
 @pytest.fixture
 def mock_config_entry() -> MockConfigEntry:
-    """A version-2 entry as the config flow would have created it."""
+    """A version-2 entry as the config flow would have created it, for an account with one mains meter."""
     return MockConfigEntry(
         domain=DOMAIN,
         title=ENTRY_TITLE,
         unique_id=USERNAME,
         version=2,
         minor_version=2,
-        data={
-            CONF_BILLING_ACCOUNT_ID: BILLING_ACCOUNT_ID,
-            CONF_COOKIES: COOKIES,
-            CONF_METER_ID: METER_ID,
-            CONF_METER_SERIAL: METER_SERIAL,
-            CONF_PASSWORD: PASSWORD,
-            CONF_USERNAME: USERNAME,
-        },
+        data=entry_data([IDS]),
     )
 
 

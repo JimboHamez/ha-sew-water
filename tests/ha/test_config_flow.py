@@ -20,6 +20,7 @@ from custom_components.sew_water.const import (
     CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
+    CONF_METERS,
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
     CONF_POLL_TIME,
@@ -89,6 +90,7 @@ async def test_full_flow_creates_entry(hass: HomeAssistant, fake_client: FakeCli
         CONF_COOKIES: COOKIES,
         CONF_METER_ID: METER_ID,
         CONF_METER_SERIAL: METER_SERIAL,
+        CONF_METERS: [{"meter_id": METER_ID, "meter_kind": "mains", "meter_serial": METER_SERIAL}],
         CONF_PASSWORD: PASSWORD,
         CONF_USERNAME: USERNAME,
     }

@@ -30,22 +30,22 @@ from custom_components.sew_water.sew_client import DailyUsage, SewBusyError, Sew
 from .conftest import BACKFILL_DAYS, REFRESHED_COOKIES, TRAILING_WINDOW_DAYS, FakeClient, usage_for
 
 
-async def read_rows(hass: HomeAssistant) -> list[tuple[datetime, float, float]]:
-    """Return (start, state, sum) for every stored mains row, oldest first."""
+async def read_rows(hass: HomeAssistant, statistic_id: str = STATISTIC_ID_MAINS) -> list[tuple[datetime, float, float]]:
+    """Return (start, state, sum) for every stored row of a statistic (mains by default), oldest first."""
     await async_wait_recording_done(hass)
     rows = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
         hass,
         dt_util.utcnow() - timedelta(days=4000),
         None,
-        {STATISTIC_ID_MAINS},
+        {statistic_id},
         "hour",
         None,
         {"state", "sum"},
     )
     return [
         (dt_util.utc_from_timestamp(r["start"]), float(r["state"] or 0), float(r["sum"] or 0))
-        for r in rows.get(STATISTIC_ID_MAINS, [])
+        for r in rows.get(statistic_id, [])
     ]
 
 
@@ -311,5 +311,5 @@ async def test_import_with_no_days_keeps_existing_total(
 ) -> None:
     coordinator: SewCoordinator = setup_integration.runtime_data
     await async_wait_recording_done(hass)
-    total = await coordinator._async_import_statistics([])
+    total = await coordinator._async_import_statistics(STATISTIC_ID_MAINS, [])
     assert total == 240 * BACKFILL_DAYS
