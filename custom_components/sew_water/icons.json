@@ -12,6 +12,15 @@
       "last_reading_date": {
         "default": "mdi:calendar-check"
       },
+      "recycled_daily_usage": {
+        "default": "mdi:water-sync"
+      },
+      "recycled_last_reading_date": {
+        "default": "mdi:calendar-check"
+      },
+      "recycled_total_usage": {
+        "default": "mdi:water-plus"
+      },
       "total_usage": {
         "default": "mdi:water-plus"
       }

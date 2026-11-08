@@ -20,6 +20,7 @@ import voluptuous as vol
 
 from .const import (
     CONF_COOKIES,
+    CONF_METERS,
     DOMAIN,
     ENTRY_TITLE,
     SERVICE_ATTR_START_DATE,
@@ -78,16 +79,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: SewConfigEntry) -> bool:
     client = SewClient(session)
     client.import_cookies(entry.data.get(CONF_COOKIES, []))
 
-    coordinator = SewCoordinator(hass, entry, client)
+    # An entry from before 2.3 does not know whether its meter is the mains or the recycled one. A client
+    # on the same session that may also send the account lookup (but still no login request) lets the
+    # coordinator list the meters once; the polling client itself stays limited to usage.
+    discovery_client = None if CONF_METERS in entry.data else SewClient(session, discovery=True)
+    coordinator = SewCoordinator(hass, entry, client, discovery_client)
+    await coordinator.async_config_entry_first_refresh()
     # Identifiers are account data, so they are not exposed as entities; with debug logging enabled
     # their last characters can be checked here.
-    _LOGGER.debug(
-        "Using billing account %s, meter %s (serial %s)",
-        mask_identifier(coordinator.ids.billing_account_id),
-        mask_identifier(coordinator.ids.meter_id),
-        mask_identifier(coordinator.ids.meter_serial),
-    )
-    await coordinator.async_config_entry_first_refresh()
+    for meter in coordinator.meters:
+        _LOGGER.debug(
+            "Using billing account %s, %s meter %s (serial %s)",
+            mask_identifier(meter.billing_account_id),
+            meter.kind,
+            mask_identifier(meter.meter_id),
+            mask_identifier(meter.meter_serial),
+        )
     entry.runtime_data = coordinator
     coordinator.async_start_keepalive()
 
