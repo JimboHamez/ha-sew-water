@@ -3,14 +3,18 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [2.3.0] - Unreleased
+## [2.3.0] — 2026-11-09
+
+Recycled-water meters, contributed by [@businesssuccess](https://github.com/businesssuccess) in
+[#15](https://github.com/JimboHamez/ha-sew-water/pull/15). Nothing changes on a property with one digital meter.
 
 ### Fixed
 - On a property with a recycled-water meter, the integration could read the recycled meter and import
   its readings as mains water. The portal lists both digital meters with no type, and on at least one
   account it lists the recycled meter first, which is the one earlier versions picked. Meters are now
   told apart by serial, as the portal's *Usage* page labels them (recycled serials start with `R`), and
-  the mains meter is always the one behind `sew_water:water_usage_mains` and the existing sensors.
+  the mains meter is always the one behind `sew_water:water_usage_mains` and the existing sensors. A property
+  with only one digital meter is always treated as mains, as before.
 - Existing installations are corrected on the first start after the update: the integration lists the
   account's meters with the stored session (no new login code), switches to the mains meter and, if the
   stored meter was the recycled one, clears `sew_water:water_usage_mains` and imports it again from the
