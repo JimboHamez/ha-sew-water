@@ -272,7 +272,9 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 billing_account_id=billing_account_id,
                 meter_id=data[CONF_METER_ID],
                 meter_serial=serial,
-                kind=meter_kind(serial),
+                # Until the upgrade has listed the meters, the stored meter keeps feeding the mains statistic
+                # as it always has.
+                kind=METER_KIND_MAINS,
             ),
         )
         self.recycled_meter = next(
@@ -431,8 +433,10 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         yesterday = dt_util.now().date() - timedelta(days=1)
         try:
             with _portal_errors():
-                await self._async_check_session()
+                # The upgrade's lookup loads the home page on its own client, which issues a new Aura token;
+                # checking the session afterwards gives the polling client the newest token for the fetch.
                 await self._async_upgrade_meters()
+                await self._async_check_session()
             # Per meter, so a meter whose statistic is empty (new, or cleared by the upgrade) gets the
             # backfill window while the other keeps the short trailing one.
             starts: dict[AccountIds, date] = {}

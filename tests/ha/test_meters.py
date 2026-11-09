@@ -276,6 +276,13 @@ async def test_upgrade_replaces_recycled_meter_and_rebuilds_mains_statistic(
     assert len(await read_rows(hass)) == BACKFILL_DAYS * 24
 
 
+async def test_upgrade_checks_the_session_after_listing_the_meters(hass: HomeAssistant, two_meters: FakeClient) -> None:
+    """The lookup loads the home page on its own client, so the polling client refreshes its token afterwards."""
+    await setup_entry(hass, make_entry(entry_data(None)))
+    names = [name for name, _arg in two_meters.calls]
+    assert names.index("discover_meters") < names.index("is_alive") < names.index("fetch_usage")
+
+
 async def test_upgrade_reimports_mains_from_the_installation_date(hass: HomeAssistant, two_meters: FakeClient) -> None:
     start = yesterday() - timedelta(days=BACKFILL_DAYS + 9)
     await seed_mains_statistic(hass, start, 99)

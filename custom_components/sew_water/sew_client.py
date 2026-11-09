@@ -21,7 +21,7 @@ This module has no Home Assistant imports so it can be unit-tested offline with 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from html.parser import HTMLParser
 from http.cookies import SimpleCookie
@@ -1030,6 +1030,11 @@ class SewClient:
         ]
         # A stable sort, so meters of the same kind keep the portal's order.
         found.sort(key=lambda ids: ids.kind != METER_KIND_MAINS)
+        if len(found) == 1 and found[0].kind != METER_KIND_MAINS:
+            # The serial prefix only tells two meters on one property apart. A lone meter stays the mains
+            # meter, as every earlier version treated it, so a mains serial that happens to start with R
+            # cannot move an existing installation's history to the recycled statistic.
+            found[0] = replace(found[0], kind=METER_KIND_MAINS)
         if len(candidates) > 1:
             # Identifiers stay out of the info line; the debug line lists them masked so the choice can be checked.
             _LOGGER.info(

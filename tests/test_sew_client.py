@@ -541,16 +541,30 @@ async def test_discover_meters_returns_both_mains_first(client: SewClient, mocke
     assert await client.async_discover_meters() == [MAINS, RECYCLED]
 
 
-async def test_discover_ids_without_a_mains_meter_falls_back_to_the_first(
-    client: SewClient, mocked: aioresponses
-) -> None:
+async def test_discover_meters_treats_a_lone_meter_as_mains(client: SewClient, mocked: aioresponses) -> None:
+    """The serial prefix only separates two meters; a single meter stays mains whatever its serial."""
     mock_home(mocked)
     meters = [meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL)]
     mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
     with patch.object(sew_client._LOGGER, "info") as info:
         ids = await client.async_discover_ids()
+    assert ids == AccountIds(BILLING_ACCOUNT_ID, RECYCLED_METER_ID, RECYCLED_SERIAL, "mains")
+    assert debug_lines(info) == []
+
+
+async def test_discover_ids_without_a_mains_meter_falls_back_to_the_first(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    mock_home(mocked)
+    meters = [
+        meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL),
+        meter_record(OTHER_METER_ID, serial="RAHA999999"),
+    ]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account_record()], meters)))
+    with patch.object(sew_client._LOGGER, "info") as info:
+        ids = await client.async_discover_ids()
     assert ids == RECYCLED
-    assert debug_lines(info) == ["No mains meter found on the billing account; using the recycled meter"]
+    assert debug_lines(info)[-1] == "No mains meter found on the billing account; using the recycled meter"
 
 
 async def test_discover_ids_without_accounts_is_protocol_error(client: SewClient, mocked: aioresponses) -> None:
