@@ -136,17 +136,26 @@
       },
       "last_reading_date": {
         "name": "Last reading date"
+      },
+      "recycled_daily_usage": {
+        "name": "Recycled daily usage"
+      },
+      "recycled_total_usage": {
+        "name": "Recycled total usage"
+      },
+      "recycled_last_reading_date": {
+        "name": "Recycled last reading date"
       }
     }
   },
   "services": {
     "force_import": {
       "name": "Force import",
-      "description": "Poll the portal now instead of waiting for the next scheduled poll."
+      "description": "Poll the portal now for every meter instead of waiting for the next scheduled poll."
     },
     "import_from_date": {
       "name": "Import from date",
-      "description": "Import every day from the given date up to yesterday into long-term statistics.",
+      "description": "Import every day from the given date up to yesterday into long-term statistics, for every meter.",
       "fields": {
         "start_date": {
           "name": "Start date",

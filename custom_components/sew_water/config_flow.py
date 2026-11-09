@@ -43,6 +43,7 @@ from .const import (
     CONF_IMPORT_FROM,
     CONF_METER_ID,
     CONF_METER_SERIAL,
+    CONF_METERS,
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
     CONF_POLL_TIME,
@@ -53,7 +54,7 @@ from .const import (
     ENTRY_TITLE,
     MIN_SCAN_INTERVAL,
 )
-from .coordinator import SewConfigEntry
+from .coordinator import SewConfigEntry, meters_to_data
 from .sew_client import SewAuthError, SewClient, SewConnectionError, SewError, SewLoginUnexplainedError
 
 _LOGGER = logging.getLogger(__name__)
@@ -169,10 +170,10 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         return None
 
     async def _async_finish(self) -> ConfigFlowResult:
-        """Discover account IDs, capture the session and create or update the entry."""
+        """Discover the account's meters, capture the session and create or update the entry."""
         assert self._client is not None and self._username is not None
         try:
-            ids = await self._client.async_discover_ids()
+            meters = await self._client.async_discover_meters()
         except SewAuthError:
             return self.async_abort(reason="invalid_auth")
         except SewConnectionError:
@@ -180,21 +181,28 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         except SewError:
             _LOGGER.exception("Could not discover the billing account or meter")
             return self.async_abort(reason="unknown")
-        session_data = {
-            CONF_BILLING_ACCOUNT_ID: ids.billing_account_id,
+        # Mains first, so CONF_METER_ID keeps naming the mains meter as it always has.
+        mains = meters[0]
+        session_data: dict[str, Any] = {
+            CONF_BILLING_ACCOUNT_ID: mains.billing_account_id,
             CONF_COOKIES: self._client.export_cookies(),
-            CONF_METER_ID: ids.meter_id,
-            CONF_METER_SERIAL: ids.meter_serial,
+            CONF_METER_ID: mains.meter_id,
+            CONF_METER_SERIAL: mains.meter_serial,
+            CONF_METERS: meters_to_data(meters),
             CONF_PASSWORD: self._password,
             CONF_USERNAME: self._username,
         }
         await self.async_set_unique_id(self._username.lower())
-        if self.source == SOURCE_REAUTH:
+        if self.source in (SOURCE_REAUTH, SOURCE_RECONFIGURE):
             self._abort_if_unique_id_mismatch(reason="wrong_account")
-            return self.async_update_reload_and_abort(self._get_reauth_entry(), data_updates=session_data)
-        if self.source == SOURCE_RECONFIGURE:
-            self._abort_if_unique_id_mismatch(reason="wrong_account")
-            return self.async_update_reload_and_abort(self._get_reconfigure_entry(), data_updates=session_data)
+            entry = self._get_reauth_entry() if self.source == SOURCE_REAUTH else self._get_reconfigure_entry()
+            if CONF_METERS not in entry.data:
+                # An entry from before 2.3 may hold the recycled meter, whose readings then sit in the mains
+                # statistic. Leave its meter keys for the coordinator's one-time upgrade after the reload,
+                # which compares them with the account's meters and repairs the statistic.
+                for key in (CONF_BILLING_ACCOUNT_ID, CONF_METER_ID, CONF_METER_SERIAL, CONF_METERS):
+                    session_data.pop(key)
+            return self.async_update_reload_and_abort(entry, data_updates=session_data)
         self._abort_if_unique_id_configured()
         self._entry_data = session_data
         return await self.async_step_history()

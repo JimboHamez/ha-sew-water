@@ -71,8 +71,8 @@ rules:
   dynamic-devices:
     status: exempt
     comment: >
-      Only one config entry is allowed (single_config_entry) and it has one meter; devices are never added
-      later.
+      Only one config entry is allowed (single_config_entry) and it has one device, which a recycled-water
+      meter shares with the mains meter; devices are never added later.
   entity-category: done
   entity-device-class: done
   entity-disabled-by-default:
@@ -89,7 +89,7 @@ rules:
       handled by the reauth flow, which Home Assistant already surfaces as a repair.
   stale-devices:
     status: exempt
-    comment: One config entry is one account with one meter; removing the entry removes the device.
+    comment: One config entry is one account with one device; removing the entry removes the device.
 
   # Platinum
   async-dependency:

@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2.3.0] - Unreleased
+
+### Fixed
+- On a property with a recycled-water meter, the integration could read the recycled meter and import
+  its readings as mains water. The portal lists both digital meters with no type, and on at least one
+  account it lists the recycled meter first, which is the one earlier versions picked. Meters are now
+  told apart by serial, as the portal's *Usage* page labels them (recycled serials start with `R`), and
+  the mains meter is always the one behind `sew_water:water_usage_mains` and the existing sensors.
+- Existing installations are corrected on the first start after the update: the integration lists the
+  account's meters with the stored session (no new login code), switches to the mains meter and, if the
+  stored meter was the recycled one, clears `sew_water:water_usage_mains` and imports it again from the
+  installation date given at setup, or the last 90 days. One info line in the log says when this happens.
+
+### Added
+- Recycled-water meters. The recycled meter's hourly readings go into a new long-term statistic,
+  `sew_water:water_usage_recycled` (*South East Water recycled usage*), for the Energy dashboard's water
+  section, with *Recycled daily usage*, *Recycled total usage* and a disabled-by-default *Recycled last
+  reading date* sensor. They appear only on properties that have a recycled meter.
+- `sew_water.force_import`, `sew_water.import_from_date`, the **Update now** button and the
+  installation-date import cover every meter. The installation-date import also fills in a meter whose
+  history is missing when the other meter's is already there.
+
 ## [2.2.4] — 2026-10-31
 
 Same code as 2.2.4b1, plus the README changes below. Promoted after a live Reconfigure on the beta

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import logging
@@ -33,7 +35,9 @@ from .const import (
     CONF_COOKIES,
     CONF_IMPORT_FROM,
     CONF_METER_ID,
+    CONF_METER_KIND,
     CONF_METER_SERIAL,
+    CONF_METERS,
     CONF_POLL_TIME,
     CONF_SCAN_INTERVAL,
     DEFAULT_POLL_TIME,
@@ -43,17 +47,23 @@ from .const import (
     KEEPALIVE_MINUTES,
     POLL_JITTER_MINUTES,
     STATISTIC_ID_MAINS,
+    STATISTIC_ID_RECYCLED,
     TRAILING_WINDOW_DAYS,
 )
 from .sew_client import (
+    METER_KIND_MAINS,
+    METER_KIND_RECYCLED,
     AccountIds,
     DailyUsage,
+    MeterKind,
     SewAuthError,
     SewBusyError,
     SewClient,
     SewConnectionError,
     SewError,
     SewProtocolError,
+    mask_identifier,
+    meter_kind,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -65,10 +75,137 @@ LOOKBACK_DAYS = 3660
 
 type SewConfigEntry = ConfigEntry[SewCoordinator]
 
+# The external statistic each kind of meter is imported into, and each statistic's display name.
+STATISTIC_IDS: Mapping[MeterKind, str] = {
+    METER_KIND_MAINS: STATISTIC_ID_MAINS,
+    METER_KIND_RECYCLED: STATISTIC_ID_RECYCLED,
+}
+STATISTIC_NAMES: Mapping[str, str] = {
+    STATISTIC_ID_MAINS: "South East Water mains usage",
+    STATISTIC_ID_RECYCLED: "South East Water recycled usage",
+}
+
+
+def statistic_id_for(meter: AccountIds) -> str:
+    """Return the external statistic a meter's readings are imported into.
+
+    Args:
+        meter: The meter, with its kind.
+
+    Returns:
+        ``sew_water:water_usage_mains`` or ``sew_water:water_usage_recycled``.
+    """
+    return STATISTIC_IDS[meter.kind]
+
+
+def meters_to_data(meters: Sequence[AccountIds]) -> list[dict[str, str | None]]:
+    """Serialise meters for the config entry's ``CONF_METERS`` list.
+
+    The billing account is stored once, under ``CONF_BILLING_ACCOUNT_ID``, so it is left out here.
+
+    Args:
+        meters: The meters, as discovery returned them.
+
+    Returns:
+        One ``{meter_id, meter_kind, meter_serial}`` dict per meter, in the same order.
+    """
+    return [
+        {CONF_METER_ID: meter.meter_id, CONF_METER_KIND: meter.kind, CONF_METER_SERIAL: meter.meter_serial}
+        for meter in meters
+    ]
+
+
+def meters_from_data(billing_account_id: str, raw: object) -> list[AccountIds]:
+    """Read the config entry's ``CONF_METERS`` list back, skipping anything malformed.
+
+    An unknown kind is classified again from the serial rather than trusted.
+
+    Args:
+        billing_account_id: The entry's billing account record ID, shared by every meter.
+        raw: The stored list, or None for an entry created before it existed.
+
+    Returns:
+        The meters in their stored order; empty when there is no usable list.
+    """
+    meters: list[AccountIds] = []
+    if not isinstance(raw, list):
+        return meters
+    for item in raw:
+        if not isinstance(item, dict) or not isinstance(meter_id := item.get(CONF_METER_ID), str):
+            continue
+        serial = item.get(CONF_METER_SERIAL)
+        serial = serial if isinstance(serial, str) else None
+        stored_kind = item.get(CONF_METER_KIND)
+        kind = next((known for known in STATISTIC_IDS if known == stored_kind), meter_kind(serial))
+        meters.append(
+            AccountIds(billing_account_id=billing_account_id, meter_id=meter_id, meter_serial=serial, kind=kind)
+        )
+    return meters
+
+
+@contextmanager
+def _portal_errors() -> Iterator[None]:
+    """Translate client errors into the coordinator's retry and reauth exceptions.
+
+    Raises:
+        ConfigEntryAuthFailed: If the stored session is no longer accepted, triggering reauth.
+        UpdateFailed: If the portal is busy (with a short ``retry_after``), unreachable or answers
+            unexpectedly.
+    """
+    try:
+        yield
+    except SewAuthError as err:
+        raise ConfigEntryAuthFailed(
+            translation_domain=DOMAIN,
+            translation_key="session_rejected",
+            translation_placeholders={"error": str(err)},
+        ) from err
+    except SewBusyError as err:
+        # Salesforce throttles with an Apex error rather than a 429; back off briefly instead of
+        # waiting for the next daily poll.
+        raise UpdateFailed(
+            translation_domain=DOMAIN,
+            translation_key="portal_busy",
+            translation_placeholders={"error": str(err)},
+            retry_after=err.retry_after or BUSY_RETRY_SECONDS,
+        ) from err
+    except SewConnectionError as err:
+        raise UpdateFailed(
+            translation_domain=DOMAIN,
+            translation_key="cannot_connect",
+            translation_placeholders={"error": str(err)},
+        ) from err
+    except SewProtocolError as err:
+        raise UpdateFailed(
+            translation_domain=DOMAIN,
+            translation_key="unexpected_response",
+            translation_placeholders={"error": str(err)},
+        ) from err
+
+
+@dataclass(frozen=True)
+class MeterData:
+    """One meter's state after a poll.
+
+    Attributes:
+        ids: Billing account and meter identifiers, with the meter's kind.
+        latest: Most recent day with a non-zero reading, if any.
+        total_litres: Running total of every litre imported into the meter's statistic.
+        window: Every day fetched for the meter in its last import, oldest first.
+    """
+
+    ids: AccountIds
+    latest: DailyUsage | None
+    total_litres: float
+    window: tuple[DailyUsage, ...]
+
 
 @dataclass(frozen=True)
 class SewData:
     """State shared with the entities after each poll.
+
+    The top-level fields describe the mains meter (or, on an account without one, the only meter), as
+    they always have, so the original sensors are unchanged.
 
     Attributes:
         ids: Billing account and meter identifiers.
@@ -76,6 +213,7 @@ class SewData:
         total_litres: Running total of every litre imported into statistics.
         last_poll: When the portal was last read successfully.
         window: Every day fetched in the last poll, oldest first.
+        recycled: The recycled-water meter's state, when the property has one.
     """
 
     ids: AccountIds
@@ -83,6 +221,7 @@ class SewData:
     total_litres: float
     last_poll: datetime
     window: tuple[DailyUsage, ...]
+    recycled: MeterData | None = None
 
 
 class SewCoordinator(DataUpdateCoordinator[SewData]):
@@ -90,23 +229,63 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
 
     config_entry: SewConfigEntry
 
-    def __init__(self, hass: HomeAssistant, entry: SewConfigEntry, client: SewClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: SewConfigEntry,
+        client: SewClient,
+        discovery_client: SewClient | None = None,
+    ) -> None:
         """Initialise the coordinator.
 
         Args:
             hass: Home Assistant instance.
             entry: The config entry that owns this coordinator.
             client: Portal client whose session already holds the stored cookies.
+            discovery_client: A client on the same session that may also list the account's meters,
+                for an entry created before recycled meters were recognised. Used once, then dropped.
         """
         super().__init__(hass, _LOGGER, config_entry=entry, name=DOMAIN, update_interval=self._interval(entry))
         self.client = client
+        self.discovery_client = discovery_client
         self.last_contact: datetime | None = None
         self.backfill_task: asyncio.Task[None] | None = None
-        self.ids = AccountIds(
-            billing_account_id=entry.data[CONF_BILLING_ACCOUNT_ID],
-            meter_id=entry.data[CONF_METER_ID],
-            meter_serial=entry.data.get(CONF_METER_SERIAL),
+        self.ids: AccountIds
+        self.recycled_meter: AccountIds | None
+        self._meter_data: dict[AccountIds, MeterData] = {}
+        self._load_meters()
+
+    def _load_meters(self) -> None:
+        """Read the meters to poll from the config entry.
+
+        ``ids`` is the meter in ``CONF_METER_ID`` (the mains meter); ``recycled_meter`` is the first
+        recycled meter in ``CONF_METERS`` other than that one. An entry without ``CONF_METERS`` polls
+        just its stored meter until the one-time upgrade has listed the others.
+        """
+        data = self.config_entry.data
+        billing_account_id = str(data[CONF_BILLING_ACCOUNT_ID])
+        stored = meters_from_data(billing_account_id, data.get(CONF_METERS))
+        serial = data.get(CONF_METER_SERIAL)
+        self.ids = next(
+            (meter for meter in stored if meter.meter_id == data[CONF_METER_ID]),
+            AccountIds(
+                billing_account_id=billing_account_id,
+                meter_id=data[CONF_METER_ID],
+                meter_serial=serial,
+                # Until the upgrade has listed the meters, the stored meter keeps feeding the mains statistic
+                # as it always has.
+                kind=METER_KIND_MAINS,
+            ),
         )
+        self.recycled_meter = next(
+            (meter for meter in stored if meter.kind == METER_KIND_RECYCLED and meter.kind != self.ids.kind),
+            None,
+        )
+
+    @property
+    def meters(self) -> tuple[AccountIds, ...]:
+        """Return every meter that is polled, the mains meter first."""
+        return (self.ids,) if self.recycled_meter is None else (self.ids, self.recycled_meter)
 
     # --------------------------------------------------------------- scheduling
 
@@ -200,13 +379,18 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         # The first refresh has only just queued its rows with the recorder; wait for the commit so
         # the check below sees them.
         await get_instance(self.hass).async_block_till_done()
-        if await self._async_has_statistics_on(start):
+        # Checked per meter: a meter added later, or a statistic cleared by the upgrade, needs its history
+        # even when the other meter's is complete.
+        missing = [
+            meter for meter in self.meters if not await self._async_has_statistics_on(statistic_id_for(meter), start)
+        ]
+        if not missing:
             _LOGGER.debug("History back to %s is already imported", start)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
         for attempt in range(1, BACKFILL_ATTEMPTS + 1):
             try:
-                await self.async_import_from(start)
+                await self.async_import_from(start, missing)
             except ValueError:
                 _LOGGER.error("Cannot import history from %s: the date is not before today", start)
                 return
@@ -238,20 +422,29 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 )
                 await asyncio.sleep(delay)
             else:
-                _LOGGER.info("Imported history back to %s", start)
+                _LOGGER.info("Imported %s history back to %s", " and ".join(meter.kind for meter in missing), start)
                 ir.async_delete_issue(self.hass, DOMAIN, issue_id)
                 return
 
     # ------------------------------------------------------------------ polling
 
     async def _async_update_data(self) -> SewData:
-        """Fetch the trailing window (or the full backfill on first run) and store statistics."""
+        """Fetch each meter's trailing window (or the full backfill on its first run) and store statistics."""
         yesterday = dt_util.now().date() - timedelta(days=1)
-        first_run = await self._async_last_statistic_day() is None
-        window_days = BACKFILL_DAYS if first_run else TRAILING_WINDOW_DAYS
-        start = yesterday - timedelta(days=window_days - 1)
         try:
-            data = await self._async_import(start, yesterday)
+            with _portal_errors():
+                # The upgrade's lookup loads the home page on its own client, which issues a new Aura token;
+                # checking the session afterwards gives the polling client the newest token for the fetch.
+                await self._async_upgrade_meters()
+                await self._async_check_session()
+            # Per meter, so a meter whose statistic is empty (new, or cleared by the upgrade) gets the
+            # backfill window while the other keeps the short trailing one.
+            starts: dict[AccountIds, date] = {}
+            for meter in self.meters:
+                first_run = await self._async_last_statistic_day(statistic_id_for(meter)) is None
+                window_days = BACKFILL_DAYS if first_run else TRAILING_WINDOW_DAYS
+                starts[meter] = yesterday - timedelta(days=window_days - 1)
+            data = await self._async_import(starts, yesterday)
         finally:
             # Re-evaluate the delay to the next poll so the daily run stays pinned to the poll time.
             self.update_interval = self._interval(self.config_entry)
@@ -272,63 +465,135 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 translation_placeholders={"error": str(self.last_exception)},
             ) from self.last_exception
 
-    async def async_import_from(self, start: date) -> None:
+    async def async_import_from(self, start: date, meters: Sequence[AccountIds] | None = None) -> None:
         """Import every day from ``start`` to yesterday, then notify entities.
 
         Args:
             start: First day to import.
+            meters: The meters to import; every polled meter when omitted.
         """
         yesterday = dt_util.now().date() - timedelta(days=1)
         if start > yesterday:
             raise ValueError("start date must be before today")
-        self.async_set_updated_data(await self._async_import(start, yesterday))
+        with _portal_errors():
+            await self._async_check_session()
+        targets = self.meters if meters is None else meters
+        self.async_set_updated_data(await self._async_import(dict.fromkeys(targets, start), yesterday))
 
-    async def _async_import(self, start: date, end: date) -> SewData:
-        """Fetch ``start``..``end`` from the portal, import statistics and build the shared state.
+    async def _async_check_session(self) -> None:
+        """Make sure the stored session is still logged in.
+
+        Raises:
+            ConfigEntryAuthFailed: If it is not, triggering reauth.
+        """
+        if not await self.client.async_is_alive():
+            raise ConfigEntryAuthFailed(translation_domain=DOMAIN, translation_key="session_expired")
+
+    async def _async_upgrade_meters(self) -> None:
+        """List the account's meters once for an entry created before recycled meters were recognised.
+
+        Those entries hold only the meter discovery picked, the first digital meter the portal listed,
+        which on a property with recycled water can be the recycled meter; its readings then went into
+        the mains statistic. This stores every meter, points ``CONF_METER_ID`` at the mains meter and, if
+        the stored meter was the recycled one, clears the mains statistic so the import that follows
+        (the backfill window, then the installation-date backfill) rebuilds it from mains readings.
+
+        This runs here rather than in ``async_migrate_entry`` because it needs the portal: a migration
+        cannot use the entry's session before setup, and a failed migration leaves the entry in
+        ``MIGRATION_ERROR`` with no retry, whereas here a network failure is an ordinary setup retry
+        and a dead session an ordinary reauth.
+
+        Raises:
+            SewAuthError: If the session is not accepted.
+            SewConnectionError: If the portal cannot be reached or is busy.
+        """
+        if CONF_METERS in self.config_entry.data or self.discovery_client is None:
+            return
+        try:
+            meters = await self.discovery_client.async_discover_meters()
+        except SewProtocolError as err:
+            # Not worth blocking the integration over: the stored meter keeps working, and the lookup is
+            # tried again on the next load.
+            _LOGGER.warning("Could not list the meters on the account; polling the stored meter only: %s", err)
+            return
+        previous = self.ids
+        previous_kind = next((m.kind for m in meters if m.meter_id == previous.meter_id), previous.kind)
+        primary = meters[0]
+        self.hass.config_entries.async_update_entry(
+            self.config_entry,
+            data={
+                **self.config_entry.data,
+                CONF_BILLING_ACCOUNT_ID: primary.billing_account_id,
+                CONF_METER_ID: primary.meter_id,
+                CONF_METER_SERIAL: primary.meter_serial,
+                CONF_METERS: meters_to_data(meters),
+            },
+        )
+        self.discovery_client = None
+        self._load_meters()
+        _LOGGER.debug(
+            "Listed the account's meters: %s",
+            [f"{mask_identifier(meter.meter_serial)} ({meter.kind})" for meter in meters],
+        )
+        if previous_kind != METER_KIND_RECYCLED:
+            return
+        start = self.import_from or dt_util.now().date() - timedelta(days=BACKFILL_DAYS)
+        _LOGGER.info(
+            "The mains statistic held recycled-water readings from an earlier version; clearing it and "
+            "importing mains usage again from %s",
+            start,
+        )
+        # Wait until the recorder has run (and committed) the clear, so the window choice that follows sees
+        # an empty statistic. ``on_done`` is called from the recorder thread.
+        cleared = asyncio.Event()
+
+        def _on_cleared() -> None:
+            self.hass.loop.call_soon_threadsafe(cleared.set)
+
+        get_instance(self.hass).async_clear_statistics([STATISTIC_ID_MAINS], on_done=_on_cleared)
+        await cleared.wait()
+
+    async def _async_import(self, starts: Mapping[AccountIds, date], end: date) -> SewData:
+        """Fetch ``start``..``end`` for each meter, import statistics and build the shared state.
+
+        Args:
+            starts: First day to fetch, per meter.
+            end: Last day to fetch, for every meter.
 
         Raises:
             ConfigEntryAuthFailed: If the stored session is no longer accepted, triggering reauth.
             UpdateFailed: If the portal is busy (with a short ``retry_after``), unreachable or answers
                 unexpectedly.
         """
-        try:
-            if not await self.client.async_is_alive():
-                raise ConfigEntryAuthFailed(translation_domain=DOMAIN, translation_key="session_expired")
-            usage = await self.client.async_fetch_usage(self.ids, start, end)
-        except SewAuthError as err:
-            raise ConfigEntryAuthFailed(
-                translation_domain=DOMAIN,
-                translation_key="session_rejected",
-                translation_placeholders={"error": str(err)},
-            ) from err
-        except SewBusyError as err:
-            # Salesforce throttles with an Apex error rather than a 429; back off briefly instead of
-            # waiting for the next daily poll.
-            raise UpdateFailed(
-                translation_domain=DOMAIN,
-                translation_key="portal_busy",
-                translation_placeholders={"error": str(err)},
-                retry_after=err.retry_after or BUSY_RETRY_SECONDS,
-            ) from err
-        except SewConnectionError as err:
-            raise UpdateFailed(
-                translation_domain=DOMAIN,
-                translation_key="cannot_connect",
-                translation_placeholders={"error": str(err)},
-            ) from err
-        except SewProtocolError as err:
-            raise UpdateFailed(
-                translation_domain=DOMAIN,
-                translation_key="unexpected_response",
-                translation_placeholders={"error": str(err)},
-            ) from err
+        fetched: list[tuple[AccountIds, list[DailyUsage]]] = []
+        with _portal_errors():
+            for meter, start in starts.items():
+                fetched.append((meter, await self.client.async_fetch_usage(meter, start, end)))
 
         self.last_contact = dt_util.utcnow()
         self._async_store_cookies()
-        total = await self._async_import_statistics(usage)
-        latest = next((day for day in reversed(usage) if day.available and day.litres > 0), None)
-        _LOGGER.debug("Imported %d day(s) %s..%s; latest reading %s", len(usage), start, end, latest)
-        return SewData(ids=self.ids, latest=latest, total_litres=total, last_poll=dt_util.utcnow(), window=tuple(usage))
+        for meter, usage in fetched:
+            total = await self._async_import_statistics(statistic_id_for(meter), usage)
+            latest = next((day for day in reversed(usage) if day.available and day.litres > 0), None)
+            self._meter_data[meter] = MeterData(ids=meter, latest=latest, total_litres=total, window=tuple(usage))
+            _LOGGER.debug(
+                "Imported %d %s day(s) %s..%s; latest reading %s",
+                len(usage),
+                meter.kind,
+                starts[meter],
+                end,
+                latest.day if latest else None,
+            )
+        mains = self._meter_data[self.ids]
+        recycled = None if self.recycled_meter is None else self._meter_data.get(self.recycled_meter)
+        return SewData(
+            ids=mains.ids,
+            latest=mains.latest,
+            total_litres=mains.total_litres,
+            last_poll=dt_util.utcnow(),
+            window=mains.window,
+            recycled=recycled,
+        )
 
     def _async_store_cookies(self) -> None:
         """Persist the (possibly refreshed) session cookies so a restart needs no new login."""
@@ -341,24 +606,24 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
     # --------------------------------------------------------------- statistics
 
     @staticmethod
-    def _metadata() -> StatisticMetaData:
-        """Describe the mains-water external statistic used by the Energy dashboard."""
+    def _metadata(statistic_id: str) -> StatisticMetaData:
+        """Describe a water external statistic used by the Energy dashboard."""
         return StatisticMetaData(
             has_sum=True,
             mean_type=StatisticMeanType.NONE,
-            name="South East Water mains usage",
+            name=STATISTIC_NAMES[statistic_id],
             source=DOMAIN,
-            statistic_id=STATISTIC_ID_MAINS,
+            statistic_id=statistic_id,
             unit_class=VolumeConverter.UNIT_CLASS,
             unit_of_measurement=UnitOfVolume.LITERS,
         )
 
-    async def _async_last_statistic_day(self) -> date | None:
+    async def _async_last_statistic_day(self, statistic_id: str) -> date | None:
         """Return the local day of the newest stored statistic, or ``None`` before the first import."""
         rows = await get_instance(self.hass).async_add_executor_job(
-            get_last_statistics, self.hass, 1, STATISTIC_ID_MAINS, True, {"sum"}
+            get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
         )
-        if not (stats := rows.get(STATISTIC_ID_MAINS)):
+        if not (stats := rows.get(statistic_id)):
             return None
         return dt_util.as_local(dt_util.utc_from_timestamp(stats[0]["start"])).date()
 
@@ -392,7 +657,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             rows.append((start, float(litres)))
         return rows
 
-    async def _async_has_statistics_on(self, day: date) -> bool:
+    async def _async_has_statistics_on(self, statistic_id: str, day: date) -> bool:
         """Return whether any statistic row exists for the local day ``day``."""
         row_start = self._row_start(day)
         rows = await get_instance(self.hass).async_add_executor_job(
@@ -400,14 +665,14 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             self.hass,
             row_start,
             row_start + timedelta(days=1),
-            {STATISTIC_ID_MAINS},
+            {statistic_id},
             "hour",
             None,
             {"sum"},
         )
-        return bool(rows.get(STATISTIC_ID_MAINS))
+        return bool(rows.get(statistic_id))
 
-    async def _async_sum_before(self, day: date) -> float:
+    async def _async_sum_before(self, statistic_id: str, day: date) -> float:
         """Return the running sum of the newest statistic row before ``day`` (0 if there is none)."""
         row_start = self._row_start(day)
         rows = await get_instance(self.hass).async_add_executor_job(
@@ -415,18 +680,18 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             self.hass,
             row_start - timedelta(days=LOOKBACK_DAYS),
             row_start,
-            {STATISTIC_ID_MAINS},
+            {statistic_id},
             # Hourly buckets so the cut-off is exact: a day bucket would start at midnight and swallow
             # the first row of the window itself.
             "hour",
             None,
             {"sum"},
         )
-        if not (stats := rows.get(STATISTIC_ID_MAINS)):
+        if not (stats := rows.get(statistic_id)):
             return 0.0
         return float(stats[-1].get("sum") or 0.0)
 
-    async def _async_import_statistics(self, usage: list[DailyUsage]) -> float:
+    async def _async_import_statistics(self, statistic_id: str, usage: list[DailyUsage]) -> float:
         """Write one statistic row per hour and return the running total after the last day.
 
         Rows are keyed by their start time, so re-importing a day simply overwrites its hours; the
@@ -435,15 +700,15 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         """
         if not usage:
             rows = await get_instance(self.hass).async_add_executor_job(
-                get_last_statistics, self.hass, 1, STATISTIC_ID_MAINS, True, {"sum"}
+                get_last_statistics, self.hass, 1, statistic_id, True, {"sum"}
             )
-            stats = rows.get(STATISTIC_ID_MAINS)
+            stats = rows.get(statistic_id)
             return float(stats[0].get("sum") or 0.0) if stats else 0.0
-        running = await self._async_sum_before(usage[0].day)
+        running = await self._async_sum_before(statistic_id, usage[0].day)
         statistics: list[StatisticData] = []
         for day in usage:
             for start, litres in self._hourly_rows(day):
                 running += litres
                 statistics.append(StatisticData(start=start, state=litres, sum=running))
-        async_add_external_statistics(self.hass, self._metadata(), statistics)
+        async_add_external_statistics(self.hass, self._metadata(statistic_id), statistics)
         return running

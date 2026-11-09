@@ -15,8 +15,13 @@ ENTRY_TITLE: Final = "South East Water"
 CONF_BILLING_ACCOUNT_ID: Final = "billing_account_id"
 CONF_COOKIES: Final = "cookies"
 CONF_IMPORT_FROM: Final = "import_from"
+# The mains meter, which every version has polled; kept so older entries and downgrades keep working.
 CONF_METER_ID: Final = "meter_id"
+CONF_METER_KIND: Final = "meter_kind"
 CONF_METER_SERIAL: Final = "meter_serial"
+# Every digital meter on the billing account, as a list of {meter_id, meter_serial, meter_kind}. Entries
+# created before 2.3 lack it; the coordinator fills it in once (see SewCoordinator._async_upgrade_meters).
+CONF_METERS: Final = "meters"
 CONF_MFA_CHANNEL: Final = "mfa_channel"
 CONF_MFA_CODE: Final = "mfa_code"
 CONF_POLL_TIME: Final = "poll_time"
@@ -51,3 +56,4 @@ SERVICE_IMPORT_FROM_DATE: Final = "import_from_date"
 SERVICE_ATTR_START_DATE: Final = "start_date"
 
 STATISTIC_ID_MAINS: Final = f"{DOMAIN}:water_usage_mains"
+STATISTIC_ID_RECYCLED: Final = f"{DOMAIN}:water_usage_recycled"

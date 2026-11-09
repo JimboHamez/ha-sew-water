@@ -32,6 +32,8 @@ async def test_diagnostics_redacts_secrets_and_identifiers(
     assert coordinator["last_poll"] is not None
     assert coordinator["latest"]["litres"] == 240
     assert coordinator["latest"]["serial"] == REDACTED
+    assert coordinator["meter_kinds"] == ["mains"]
+    assert coordinator["recycled"] is None
     assert coordinator["total_litres"] > 0
     assert coordinator["window_days"] > 0
     assert coordinator["update_interval"]
@@ -48,6 +50,8 @@ async def test_diagnostics_without_data(
     assert result["coordinator"] == {
         "last_poll": None,
         "latest": None,
+        "meter_kinds": ["mains"],
+        "recycled": None,
         "total_litres": None,
         "update_interval": result["coordinator"]["update_interval"],
         "window_days": 0,

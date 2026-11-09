@@ -21,14 +21,14 @@ This module has no Home Assistant imports so it can be unit-tested offline with 
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from html.parser import HTMLParser
 from http.cookies import SimpleCookie
 import json
 import logging
 import re
-from typing import Any, NotRequired, TypedDict, cast
+from typing import Any, Final, Literal, NotRequired, TypedDict, cast
 from urllib.parse import unquote
 
 import aiohttp
@@ -67,10 +67,19 @@ _SETUP_REQUESTS = _POLL_REQUESTS | {
 # Every Aura action the client may send. Polling only fetches usage. Logging in and the account
 # lookup, whose response carries the customer's account records, are for setup only.
 _POLL_ACTIONS = frozenset({f"{APEX_USAGE_CLASSNAME}.{APEX_USAGE_METHOD}"})
-_SETUP_ACTIONS = _POLL_ACTIONS | {LOGIN_DESCRIPTOR, f"{APEX_USAGE_CLASSNAME}.{APEX_DISCOVERY_METHOD}"}
+_DISCOVERY_ACTIONS = _POLL_ACTIONS | {f"{APEX_USAGE_CLASSNAME}.{APEX_DISCOVERY_METHOD}"}
+_SETUP_ACTIONS = _DISCOVERY_ACTIONS | {LOGIN_DESCRIPTOR}
 # Redirects are followed by the client itself so that every hop is checked against the allowlist.
 _MAX_REDIRECTS = 10
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+# A property can have a potable (mains) meter and a recycled-water meter. The discovery call carries no
+# type field; the portal labels them "Potable meter: S..." and "Recycled meter: R...", so the serial's
+# first letter is what tells them apart.
+type MeterKind = Literal["mains", "recycled"]
+METER_KIND_MAINS: Final = "mains"
+METER_KIND_RECYCLED: Final = "recycled"
+_RECYCLED_SERIAL_PREFIX = "r"
 
 MFA_CHANNEL_EMAIL = "Email"
 MFA_CHANNEL_SMS = "SMS"
@@ -202,11 +211,14 @@ class AccountIds:
         billing_account_id: ``Billing_Account__c`` record ID (``a08...``).
         meter_id: ``Meter_Details__c`` record ID (``a1K...``).
         meter_serial: Physical meter serial number when the portal reports it.
+        kind: Whether the meter measures mains (potable) or recycled water. Defaults to mains, which is
+            how every meter was treated before recycled meters were recognised.
     """
 
     billing_account_id: str
     meter_id: str
     meter_serial: str | None = None
+    kind: MeterKind = METER_KIND_MAINS
 
 
 @dataclass(frozen=True)
@@ -424,6 +436,23 @@ def _action_name(action: dict[str, Any]) -> str:
     return f"{params.get('classname')}.{params.get('method')}"
 
 
+def meter_kind(serial: str | None) -> MeterKind:
+    """Classify a meter from its serial.
+
+    The portal lists recycled-water meters with serials that start with ``R`` and potable (mains)
+    meters with serials that start with ``S``; nothing else in the discovery response tells them apart.
+
+    Args:
+        serial: The meter serial (the meter record's ``Name``), or None when the portal gave none.
+
+    Returns:
+        ``recycled`` for a serial starting with ``R`` (any case), otherwise ``mains``.
+    """
+    if serial and serial.strip().casefold().startswith(_RECYCLED_SERIAL_PREFIX):
+        return METER_KIND_RECYCLED
+    return METER_KIND_MAINS
+
+
 def mask_identifier(value: str | None) -> str:
     """Mask an account identifier for a log line, keeping only its last four characters.
 
@@ -453,7 +482,12 @@ class SewClient:
     """
 
     def __init__(
-        self, session: aiohttp.ClientSession, base_url: str = DEFAULT_BASE_URL, *, setup: bool = False
+        self,
+        session: aiohttp.ClientSession,
+        base_url: str = DEFAULT_BASE_URL,
+        *,
+        setup: bool = False,
+        discovery: bool = False,
     ) -> None:
         """Create a client.
 
@@ -462,10 +496,13 @@ class SewClient:
             base_url: Portal origin, without a trailing slash.
             setup: Also allow the login, MFA and account-lookup requests that setting up or
                 re-authenticating needs. A client that only polls leaves this False.
+            discovery: Also allow the account lookup, but none of the login or MFA requests. For a
+                one-off lookup with an existing session, such as upgrading an older config entry.
         """
         self._session = session
         self._base = URL(base_url.rstrip("/"))
         self._setup = setup
+        self._discovery = discovery
         self._context: AuraContext | None = None
         self._token: str | None = None
         self._mfa_form: _MfaForm | None = None
@@ -505,7 +542,12 @@ class SewClient:
         Raises:
             SewRequestRefusedError: If any action is not one this client needs.
         """
-        allowed = _SETUP_ACTIONS if self._setup else _POLL_ACTIONS
+        if self._setup:
+            allowed = _SETUP_ACTIONS
+        elif self._discovery:
+            allowed = _DISCOVERY_ACTIONS
+        else:
+            allowed = _POLL_ACTIONS
         for action in actions:
             if (name := _action_name(action)) not in allowed:
                 raise SewRequestRefusedError(f"Refused Aura action {name}")
@@ -936,19 +978,21 @@ class SewClient:
 
     # --------------------------------------------------------------------- data
 
-    async def async_discover_ids(self) -> AccountIds:
-        """Find the billing account and meter record IDs for the logged-in customer.
+    async def async_discover_meters(self) -> list[AccountIds]:
+        """Find every digital meter on the logged-in customer's billing account.
 
         Mirrors the usage page's own start-up call, ``getBillingAccountsAndMetersForUser``, which returns
         the user's billing accounts and the meters on their properties. A login can hold several
-        accounts; the first account whose property has a digital meter is used, with that meter.
+        accounts; the first account whose property has a digital meter is used. Its property can have a
+        mains (potable) meter and a recycled-water meter, which the portal may list in either order.
 
         Returns:
-            The IDs required by ``async_fetch_usage``.
+            The IDs of each digital meter on that account, mains meters first and otherwise in the
+            portal's order, each with its ``kind``.
 
         Raises:
             SewAuthError: If not logged in.
-            SewProtocolError: If the IDs cannot be found.
+            SewProtocolError: If no account with a digital meter can be found.
         """
         context, token = await self._ensure_home()
         action = self._apex_action(APEX_USAGE_CLASSNAME, APEX_DISCOVERY_METHOD)
@@ -973,25 +1017,59 @@ class SewClient:
         candidates = [(a, m) for a in accounts for m in meters if m["Property__c"] == a.get("Property__c")]
         if not candidates:
             raise SewProtocolError(f"No digital meter found for the {len(accounts)} billing account(s) on this login")
-        account, meter = candidates[0]
+        account = candidates[0][0]
+        found = [
+            AccountIds(
+                billing_account_id=str(account["Id"]),
+                meter_id=str(meter["Id"]),
+                meter_serial=str(meter["Name"]) if meter.get("Name") else None,
+                kind=meter_kind(meter.get("Name")),
+            )
+            for a, meter in candidates
+            if a is account
+        ]
+        # A stable sort, so meters of the same kind keep the portal's order.
+        found.sort(key=lambda ids: ids.kind != METER_KIND_MAINS)
+        if len(found) == 1 and found[0].kind != METER_KIND_MAINS:
+            # The serial prefix only tells two meters on one property apart. A lone meter stays the mains
+            # meter, as every earlier version treated it, so a mains serial that happens to start with R
+            # cannot move an existing installation's history to the recycled statistic.
+            found[0] = replace(found[0], kind=METER_KIND_MAINS)
         if len(candidates) > 1:
             # Identifiers stay out of the info line; the debug line lists them masked so the choice can be checked.
             _LOGGER.info(
-                "Found %d digital meters across %d billing account(s); using the first the portal lists",
+                "Found %d digital meters across %d billing account(s); using the first account's %d mains and %d "
+                "recycled meter(s)",
                 len(candidates),
                 len({a["Id"] for a, _ in candidates}),
+                sum(1 for ids in found if ids.kind == METER_KIND_MAINS),
+                sum(1 for ids in found if ids.kind == METER_KIND_RECYCLED),
             )
             _LOGGER.debug(
                 "Digital meter serials in portal order: %s; using %s",
                 [mask_identifier(m.get("Name")) for _, m in candidates],
-                mask_identifier(meter.get("Name")),
+                [f"{mask_identifier(ids.meter_serial)} ({ids.kind})" for ids in found],
             )
-        serial = meter.get("Name")
-        return AccountIds(
-            billing_account_id=str(account["Id"]),
-            meter_id=str(meter["Id"]),
-            meter_serial=str(serial) if serial else None,
-        )
+        return found
+
+    async def async_discover_ids(self) -> AccountIds:
+        """Find the billing account and mains meter record IDs for the logged-in customer.
+
+        Uses ``async_discover_meters`` and returns its first meter: the mains meter when the property has
+        one, otherwise the first digital meter the portal lists.
+
+        Returns:
+            The IDs required by ``async_fetch_usage``.
+
+        Raises:
+            SewAuthError: If not logged in.
+            SewProtocolError: If the IDs cannot be found.
+        """
+        meters = await self.async_discover_meters()
+        ids = meters[0]
+        if ids.kind != METER_KIND_MAINS:
+            _LOGGER.info("No mains meter found on the billing account; using the %s meter", ids.kind)
+        return ids
 
     @staticmethod
     def _apex_action(classname: str, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

@@ -17,7 +17,7 @@ Daily mains water usage from the [South East Water](https://my.southeastwater.co
 
 It gives you:
 
-- **Energy dashboard water** — one long-term statistic, `sew_water:water_usage_mains`, with a row for every **hour**, so the dashboard's hourly, daily, weekly and monthly views are all real.
+- **Energy dashboard water** — one long-term statistic, `sew_water:water_usage_mains`, with a row for every **hour**, so the dashboard's hourly, daily, weekly and monthly views are all real. A property with a recycled-water meter gets a second one, `sew_water:water_usage_recycled`.
 - **Sensors** — yesterday's litres (with the 24 hourly readings as attributes), a running total and the reading date.
 - **One login** — sign in once with your portal email, password and a one-time code; the session is kept and re-used, and survives restarts.
 - **Late data handled** — the portal publishes readings a day or two late and sometimes corrects them, so every poll re-imports the last 30 days.
@@ -77,9 +77,9 @@ Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.
 
 A working login for [my.southeastwater.com.au](https://my.southeastwater.com.au). During setup the portal will send a one-time code to the email address or mobile number on the account, so have that to hand.
 
-**Supported:** South East Water residential and business accounts with a **digital (smart) water meter** — the ones whose usage appears on the portal's *Usage* page as an hourly graph. One config entry covers one portal login; if the login has several billing accounts or meters, the first one the portal returns is used.
+**Supported:** South East Water residential and business accounts with a **digital (smart) water meter** — the ones whose usage appears on the portal's *Usage* page as an hourly graph. One config entry covers one portal login; if the login has several billing accounts, the first one with a digital meter is used. A property with both a potable (mains) and a **recycled-water** digital meter has both read: mains into `sew_water:water_usage_mains`, recycled into `sew_water:water_usage_recycled`.
 
-**Not supported:** conventional (manually read) meters, which have no daily data in the portal; recycled-water meters (the author has none to test against); other Victorian retailers, including Yarra Valley Water, even though they run the same portal software.
+**Not supported:** conventional (manually read) meters, which have no daily data in the portal; other Victorian retailers, including Yarra Valley Water, even though they run the same portal software.
 
 ### 2. Recorder
 
@@ -126,7 +126,7 @@ Repositories added from a link are checked for updates every 48 hours, so a new 
 2. Remove the files. Marketplace: **Settings → Marketplace** → **South East Water** → remove it. HACS: HACS → **South East Water** → ⋮ → **Remove**. Manual install: delete `config/custom_components/sew_water/`.
 3. Restart Home Assistant.
 
-One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
+One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** (and `sew_water:water_usage_recycled`, if you have a recycled meter) and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
 
 The integration uses only `aiohttp`, which ships with Home Assistant — nothing else to install.
 
@@ -213,7 +213,7 @@ The protocol, the statistics rules and every design decision are in [DESIGN_DOCU
 
 ### Energy dashboard
 
-*Settings → Dashboards → Energy → Water consumption → Add water source* and pick **`sew_water:water_usage_mains`**.
+*Settings → Dashboards → Energy → Water consumption → Add water source* and pick **`sew_water:water_usage_mains`**. If you have a recycled-water meter, add **`sew_water:water_usage_recycled`** as a second water source.
 
 > ⚠️ Use the statistic, not the `Total usage` sensor. The statistic has one row per hour with the correct timestamp, including back-filled and corrected days. The sensor only changes once per poll, so the dashboard would attribute a whole day's usage to the minute the poll ran.
 
@@ -228,6 +228,11 @@ All entities sit on one device, **South East Water**.
 | `sensor.south_east_water_daily_usage` | L | Most recent published day's usage. Attributes: `reading_date`, `hourly_readings` (24 values). |
 | `sensor.south_east_water_total_usage` | L | Running total of every day imported (`total_increasing`). |
 | `sensor.south_east_water_last_reading_date` | date | Day the *Daily usage* value belongs to. Diagnostic; **disabled by default** — enable it from the entity's settings if you want it on a card (the same date is the `reading_date` attribute of *Daily usage*). |
+| `sensor.south_east_water_recycled_daily_usage` | L | Only with a recycled-water meter. The same as *Daily usage*, for the recycled meter. |
+| `sensor.south_east_water_recycled_total_usage` | L | Only with a recycled-water meter. The same as *Total usage*, for the recycled meter. |
+| `sensor.south_east_water_recycled_last_reading_date` | date | Only with a recycled-water meter. The same as *Last reading date*, for the recycled meter; **disabled by default**. |
+
+The *Daily usage*, *Total usage* and *Last reading date* sensors are always the mains (potable) meter.
 
 | Button | Description |
 |---|---|
@@ -340,7 +345,8 @@ actions:
 - **History imported by earlier versions is daily.** Days imported before hourly statistics were introduced have a single row at 11:00; they are converted to hourly rows automatically as they fall inside the 30-day re-import window, or all at once with `sew_water.import_from_date`.
 - **One-time code on every login.** The portal offers no "remember this device". Setup, re-authentication and reconfigure each need a code; the integration keeps the session alive with a small request every 30 minutes so this is rare, but it cannot be avoided when the portal ends the session (for example after a portal release or a password change).
 - **One account per Home Assistant.** A second South East Water entry cannot be added, because every entry would write to the same `sew_water:water_usage_mains` statistic.
-- **One login, one meter.** If a portal login has several billing accounts or meters, only the first one returned by the portal is used. Mains water only — recycled-water meters are not read.
+- **One login, one property.** If a portal login has several billing accounts, only the first one with a digital meter is used. On that property the mains (potable) meter and a recycled-water meter are both read; the portal does not say which is which, so the integration goes by the serial, as the portal's own *Usage* page labels them (recycled serials start with `R`). A property with only one digital meter is always treated as mains. If a property has more than one meter of the same kind, only the first is read.
+- **Upgrading from 2.2 or earlier with a recycled meter.** Earlier versions read whichever digital meter the portal listed first, which on some properties was the recycled one, so `sew_water:water_usage_mains` held recycled water. On the first start after the update the integration lists the meters, switches to the mains meter and, if the old one was recycled, clears `sew_water:water_usage_mains` and imports it again (from the installation date given at setup, or the last 90 days). The recycled meter's history goes into `sew_water:water_usage_recycled`.
 - **Backfill on first setup is 90 days** unless you give an installation date in the wizard. `sew_water.import_from_date` covers anything else.
 - **Sensor totals versus statistics.** The *Total usage* sensor changes once per poll, so its history attributes the whole day to the minute the poll ran. Use the statistic for the Energy dashboard.
 - **The portal is not an API.** The integration speaks the portal's own web protocol; a change on South East Water's side can stop it working until the integration is updated. The client is isolated in one module to keep such fixes small.
@@ -379,7 +385,6 @@ Debug output never includes your email, password, cookies or one-time codes. Acc
 
 ## Roadmap
 
-- **Recycled water** — not supported; the author has no recycled meter to test against. Contributions welcome.
 - **Yarra Valley Water** — runs on the same Salesforce Experience Cloud backend and the client could be adapted, but it is untested and not included.
 
 Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items).

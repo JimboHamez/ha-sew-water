@@ -17,7 +17,7 @@ it; the module docstrings cover how each piece works.
 | G4 | Cope with the portal publishing readings late. | Every poll re-fetches and re-imports a trailing window. |
 | G5 | Keep 1.x history. | Same statistic id and row timestamps, so existing rows are overwritten, never duplicated. |
 
-Non-goals: recycled water (author has no such meter), Yarra Valley Water (same Salesforce backend but
+Non-goals: Yarra Valley Water (same Salesforce backend but
 untestable), YAML configuration, PyPI packaging.
 
 ## 2. Decisions
@@ -39,6 +39,7 @@ untestable), YAML configuration, PyPI packaging.
 | D13 | Billing-account ID, meter record ID and meter serial are not entities and not on the device card. | They identify the customer's account; as entities they would be persisted in the recorder and appear in every state dump. They stay in the config entry (needed for API calls), are redacted from diagnostics, and are logged once at debug level on startup for checking. |
 | D14 | Throttling is detected from Salesforce's Apex error text ("concurrent requests limit exceeded"), plus HTTP 429/503 with `Retry-After` for good measure, and surfaced as `SewBusyError` → `UpdateFailed(retry_after=15 min)`. Usage batches are 30 actions and the daily poll carries up to 10 min of random jitter. | The core Salesforce platform does not use 429 for Aura requests; the limit that applies is the org-wide cap of 10 synchronous Apex requests running > 5 s, shared by every portal user. Keeping each batch under ~3 s stays out of that pool, jitter avoids installations colliding, and a short retry beats waiting for the next day. |
 | D15 | `clientOutOfSync` reloads the home page for a fresh Aura context and retries once. | It means the cached `fwuid` is stale after a Salesforce release, not that the session is dead; treating it as an auth failure would demand a needless one-time code. |
+| D17 | A property's mains and recycled-water meters are told apart by serial: `R…` is recycled, anything else mains. A property's only digital meter is always mains, whatever its serial, so single-meter installations behave exactly as before. Each kind has its own statistic (`sew_water:water_usage_mains`, `sew_water:water_usage_recycled`); `CONF_METER_ID`/`CONF_METER_SERIAL` stay the mains meter and `CONF_METERS` lists every meter with its kind. Entries from before 2.3 are upgraded by the coordinator on their first refresh, not by `async_migrate_entry`. | `getBillingAccountsAndMetersForUser` returns no type field, and a capture on 2026-11-08 listed the recycled meter first, so earlier versions imported recycled water as mains. The portal's own UI labels the meters by the same serial prefix. The upgrade needs the portal (one discovery call on the stored session), which a migration cannot make before setup, and a failed migration has no retry; in the coordinator a network failure is a setup retry and a dead session a reauth. If the stored meter was recycled, the mains statistic is cleared and rebuilt by the normal first-run and installation-date paths. |
 | D16 | A keep-alive loads `/s/` every `KEEPALIVE_MINUTES` (30) between polls, skipped when the portal was touched more recently than that; a dead session starts reauth directly. | The portal's idle timeout is between 2 h and 4 h (measured 2026-09-16: alive after 2.0 h idle, dead after 4.0 h; Salesforce offers 2 h or 4 h at that range, so it is treated as 2 h). Daily polls are 24 h apart, so without it every poll would need a new code. 30 min is one page load, tolerates three missed ticks before the 2 h mark, and is the interval proven over 22 h. |
 
 ## 3. Architecture
@@ -83,7 +84,7 @@ login flow for the one-time code.
 | 6 | `POST /PortalMFALoginFlow` with `otpHidden`, `otpBox1..6`, new ViewState×4, verify button | Success = `Location: /s/` header (the client also accepts `<meta name="Location">`). Failure = the same form again with an error span. |
 | 7 | `GET /s/` | Every HTML page load issues a fresh Aura CSRF token in a `__Host-ERIC_PROD-*` cookie; the page names that cookie in its `"eikoocnekot"` bootstrap setting. Context app is `siteforce:communityApp`. A dead session redirects to `/s/login/`. |
 | 8 | `POST /s/sfsites/aura` action `aura://ApexActionController/ACTION$execute`, class `MysewUsageBillingGraphController`, method `getUsageData`, params `{baId, meterId, dateFrom, dateTo, resolution:"hourly"}` | One action per day; 30 actions per POST (120 verified to work, 30 keeps each request under the 5 s long-running threshold, see D14). Returns `[{apiDate, readings[24], serialNo, message, status}]`; the client sums the 24 hourly litres. `resolution:"daily"` was never captured and is not used. |
-| 9 | ID discovery, mirroring the usage page's own start-up call: `aura://ApexActionController/ACTION$execute`, class `MysewUsageBillingGraphController`, method `getBillingAccountsAndMetersForUser`, **no `params` key**. Returns `{billingAccounts: [{Id, Property__c, …}], meters: [{Id, Name, Property__c, Is_Digital__c}], baSettings: […]}`. The client takes the first account whose `Property__c` has a meter with `Is_Digital__c = true`, and that meter (`Name` is the serial). | `baId`/`meterId` are Salesforce record ids (`a08…`, `a1K…`), not the account number or meter serial. The meter is linked to the *property*, not the billing account, and one login can hold several accounts, some at properties with only a mechanical meter. Captured live 2026-09-29. Until then discovery used `apex://cm_AccountBillingUsageAURA/ACTION$retrieveBillingAccounts` + `…$retrieveSObject` (captured 2026-09-15); the portal removed `retrieveBillingAccounts` by 2026-09-24 and now drops that action with an empty `actions` list (issue #5). |
+| 9 | ID discovery, mirroring the usage page's own start-up call: `aura://ApexActionController/ACTION$execute`, class `MysewUsageBillingGraphController`, method `getBillingAccountsAndMetersForUser`, **no `params` key**. Returns `{billingAccounts: [{Id, Property__c, …}], meters: [{Id, Name, Property__c, Is_Digital__c}], baSettings: […]}`. The client takes the first account whose `Property__c` has a meter with `Is_Digital__c = true`, and every digital meter on that property (`Name` is the serial; `R…` is recycled water, see D17), mains first. | `baId`/`meterId` are Salesforce record ids (`a08…`, `a1K…`), not the account number or meter serial. The meter is linked to the *property*, not the billing account, and one login can hold several accounts, some at properties with only a mechanical meter. Captured live 2026-09-29. Until then discovery used `apex://cm_AccountBillingUsageAURA/ACTION$retrieveBillingAccounts` + `…$retrieveSObject` (captured 2026-09-15); the portal removed `retrieveBillingAccounts` by 2026-09-24 and now drops that action with an empty `actions` list (issue #5). |
 
 Every Aura POST sends `aura.context` (mode, app, fwuid, loaded), `aura.pageURI`, `aura.token` and the
 `message` JSON, form-encoded. Error mapping: `exceptionEvent` naming `invalidSession` → `SewAuthError`;
@@ -127,8 +128,9 @@ setup ──▶ login+MFA ──▶ cookies saved in entry.data
 
 ## 6. Statistics design
 
-- One external statistic, `sew_water:water_usage_mains`, `has_sum=True`, `mean_type=NONE`,
-  `unit_class="volume"`, unit litres.
+- One external statistic per meter kind, `sew_water:water_usage_mains` and (only with a recycled-water
+  meter) `sew_water:water_usage_recycled`, `has_sum=True`, `mean_type=NONE`, `unit_class="volume"`, unit
+  litres. Every rule below applies to each statistic on its own.
 - One row per **hour**: start = UTC instant of local midnight + *h* hours (h = 0..23), `state` = that
   hour's litres, `sum` = running total. On the 23-hour daylight-saving day the 24th reading, which
   would land on the next day's midnight, is folded into hour 22's row. A day the portal returns
@@ -137,8 +139,9 @@ setup ──▶ login+MFA ──▶ cookies saved in entry.data
   (`statistics_during_period`, hourly buckets, looking back up to ten years), then every hour in the
   window is written with `async_add_external_statistics` (720 rows per daily poll, 2160 on first run). Rows are keyed by start time, so the import overwrites in
   place and stays consistent even when an earlier day inside the window changes.
-- First run is detected by the absence of any row (`get_last_statistics`), which is why an upgrade
-  from 1.x takes the 30-day path rather than re-backfilling.
+- First run is detected per statistic by the absence of any row (`get_last_statistics`), which is why an
+  upgrade from 1.x takes the 30-day path rather than re-backfilling, and why a recycled meter seen for
+  the first time gets the 90-day window while the mains meter keeps the 30-day one.
 - `total_usage` sensor = the running total after the last imported day. It is `total_increasing`
   for card/automation use only; the README tells users to point the Energy dashboard at the
   statistic, because a once-a-day sensor would be attributed to the poll minute.
