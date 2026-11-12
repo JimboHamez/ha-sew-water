@@ -13,8 +13,10 @@ All notable changes to this project are documented here. The format follows
   property addresses. Logins with one such property see no new step.
 - Re-authentication and **Reconfigure** keep the property chosen at setup instead of picking again.
 
-If you are affected, remove the integration and add it again to choose the right property. The addresses
-are only shown during setup; they are not stored, logged or included in diagnostics.
+If you are affected, remove the integration, delete the `sew_water:water_usage_mains` statistic in
+*Developer tools → Statistics* (the wrong property filled it with days of 0 L, which the history import would
+keep), then add the integration again and choose the right property. The addresses are only shown during
+setup; they are not stored, logged or included in diagnostics.
 
 ## [2.3.0] — 2026-11-09
 
