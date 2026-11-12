@@ -283,7 +283,7 @@ data:
 
 ## Use cases
 
-- **Water on the Energy dashboard** — the main reason this exists: daily water next to electricity and gas, with the dashboard's day/week/month/year views and cost tracking (set a $/L price on the water source).
+- **Water on the Energy dashboard** — the main reason this exists: daily water next to electricity and gas, with the dashboard's day/week/month/year views.
 - **Leak and unusual-use alerts** — yesterday's total is a single number that is easy to compare against a threshold or a moving average; overnight hours in `hourly_readings` should be near zero on a healthy property.
 - **Consumption targets** — track a running total against a budget for the billing quarter using the `Total usage` sensor and a utility meter helper with a quarterly cycle.
 - **Long-term records** — the statistic is kept by the recorder for as long as your other long-term statistics, and `sew_water.import_from_date` can pull in everything since your digital meter was installed.
@@ -375,6 +375,7 @@ actions:
 - **Upgrading from 2.2 or earlier with a recycled meter.** Earlier versions read whichever digital meter the portal listed first, which on some properties was the recycled one, so `sew_water:water_usage_mains` held recycled water. On the first start after the update the integration lists the meters, switches to the mains meter and, if the old one was recycled, clears `sew_water:water_usage_mains` and imports it again (from the installation date given at setup, or the last 90 days). The recycled meter's history goes into `sew_water:water_usage_recycled`.
 - **Backfill on first setup is 90 days** unless you give an installation date in the wizard. `sew_water.import_from_date` covers anything else.
 - **Sensor totals versus statistics.** The *Total usage* sensor changes once per poll, so its history attributes the whole day to the minute the poll ran. Use the statistic for the Energy dashboard.
+- **No water cost yet.** Home Assistant doesn't accept a $/L price for a water source that comes from a long-term statistic, which is how this integration feeds the Energy dashboard, so the water card can't show cost. Adding a cost statistic built from South East Water's published prices is being discussed in [#9](https://github.com/JimboHamez/ha-sew-water/discussions/9).
 - **The portal is not an API.** The integration speaks the portal's own web protocol; a change on South East Water's side can stop it working until the integration is updated. The client is isolated in one module to keep such fixes small.
 
 ---
