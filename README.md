@@ -148,7 +148,7 @@ The integration uses only `aiohttp`, which ships with Home Assistant — nothing
 
 **Settings → Devices & Services → Add Integration → South East Water**
 
-The wizard has four steps; steps 2 and 3 only appear when the portal asks for a one-time code (it always does today).
+The wizard has five steps. Steps 2 and 3 only appear when the portal asks for a one-time code (it always does today), and step 4 only when your login holds more than one property with a digital meter.
 
 ### Step 1 — Sign in
 ![Step 1 — Sign in](images/config-step1-signin.png)
@@ -175,9 +175,21 @@ The wizard has four steps; steps 2 and 3 only appear when the portal asks for a 
 |---|---|
 | One-time code | The 6-digit code the portal just sent. Spaces and dashes are ignored. |
 
-The billing account and meter are discovered automatically once the code is accepted. If your login holds more than one property with a digital meter, setup then shows a **Choose the property** step with a drop-down of their addresses: pick the one whose water usage you want, usually the one you pay usage charges for. The addresses are shown only in this step; they are not stored, logged or included in diagnostics.
+The billing account and meter are discovered automatically once the code is accepted.
 
-### Step 4 — Import history (optional)
+### Step 4 — Choose the property (only if your login holds more than one property)
+![Step 4 — Choose the property](images/config-step4-property.png)
+<!-- placeholder: capture the property drop-down (a login with two properties); blur the addresses -->
+
+| Field | Description |
+|---|---|
+| Property | The property's address, as the portal lists it. Pick the one whose water usage you want, usually the one you pay usage charges for. An investment property whose tenant pays for water shows no readings. |
+
+A login can hold several properties, such as your home and an investment property, and the portal's order doesn't say which is yours, so setup asks. The addresses are shown only in this step; they are not stored, logged or included in diagnostics. To switch property later, see [Known limitations](#known-limitations).
+
+### Step 5 — Import history (optional)
+![Step 5 — Import history](images/config-step5-history.png)
+<!-- placeholder: capture the installation-date page -->
 
 | Field | Description |
 |---|---|
@@ -208,7 +220,7 @@ If the portal rejects the saved password, an extra **Update password** step appe
 
 ### Reconfigure
 
-To change your portal password, or to force a fresh login without waiting for the session to expire: **Settings → Devices & Services → South East Water** → ⋮ → **Reconfigure**. Enter the credentials (the email is pre-filled and must stay the same — a different email is a different account, so add it as a new entry instead), choose where to send the code and enter it. The stored session and password are replaced in place; entities and history are untouched.
+To change your portal password, or to force a fresh login without waiting for the session to expire: **Settings → Devices & Services → South East Water** → ⋮ → **Reconfigure**. Enter the credentials (the email is pre-filled and must stay the same — a different email is a different account, so add it as a new entry instead), choose where to send the code and enter it. The stored session and password are replaced in place; entities, history and the property chosen at setup are untouched.
 
 ---
 
@@ -275,6 +287,8 @@ data:
 - **Leak and unusual-use alerts** — yesterday's total is a single number that is easy to compare against a threshold or a moving average; overnight hours in `hourly_readings` should be near zero on a healthy property.
 - **Consumption targets** — track a running total against a budget for the billing quarter using the `Total usage` sensor and a utility meter helper with a quarterly cycle.
 - **Long-term records** — the statistic is kept by the recorder for as long as your other long-term statistics, and `sew_water.import_from_date` can pull in everything since your digital meter was installed.
+
+---
 
 ## Automation examples
 

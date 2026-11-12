@@ -21,12 +21,20 @@ Separate every top-level section with a `---` horizontal rule.
 | 5 | Installation | `## Installation` | Required |
 | 6 | Configuration | `## Configuration` | Required |
 | 7 | How it works | `## How it works` | Required |
-| 8 | Sensors | `## Sensors` | Required |
+| 8 | Entities | `## Entities` | Required |
 | 9 | Services | `## Services` | Required |
-| 10 | Standalone tools | `## Standalone tools` | Optional |
-| 11 | Roadmap | `## Roadmap` | Optional |
-| 12 | Compatibility | `## Compatibility` | Required |
-| 13 | License | `## License` | Required |
+| 10 | Use cases | `## Use cases` | Required |
+| 11 | Automation examples | `## Automation examples` | Required |
+| 12 | Known limitations | `## Known limitations` | Required |
+| 13 | Troubleshooting | `## Troubleshooting` | Required |
+| 14 | Standalone tools | `## Standalone tools` | Optional |
+| 15 | Roadmap | `## Roadmap` | Optional |
+| 16 | Compatibility | `## Compatibility` | Required |
+| 17 | Home Assistant quality scale | `## Home Assistant quality scale` | Required |
+| 18 | License | `## License` | Required |
+
+Sections 10–13 are what the quality scale's Gold documentation rules ask for (`docs-use-cases`,
+`docs-examples`, `docs-known-limitations`, `docs-troubleshooting`), so they are required here.
 
 ---
 
@@ -35,8 +43,9 @@ Separate every top-level section with a `---` horizontal rule.
 - `# <Integration name>` as the H1.
 - **Badge block**, two rows, in this order:
   1. Status/meta shields (`style=for-the-badge`): Marketplace (links to the install steps), GitHub Release, downloads,
-     license, commit activity, maintenance year.
-  2. Workflow status badges (Tests, Validate, hassfest) — add each one when its
+     license, commit activity, maintenance year, and the HA quality scale badge (links to
+     `#home-assistant-quality-scale`; it says "no tier claimed" while no tier is claimed).
+  2. Workflow status badges (Tests, Validate, hassfest, Security) — add each one when its
      workflow exists under `.github/workflows/`.
 - One-sentence **value proposition** naming the portal it reads from.
 - An **`It gives you:`** bulleted feature list — each bullet **bold lead-in** + plain-English
@@ -52,8 +61,11 @@ the plain-HTTP approach is better. No tables, no config detail.
 ## 3. What's new in vX.Y.Z — *Required*
 
 - Heading carries the **current release version** and the 🆕 emoji.
-- 1–2 paragraphs in plain language describing the headline change for **this** release only.
-- Include an **"Upgrading?"** note when behaviour or migration affects existing users.
+- Bold-lead-in bullets in plain language describing **this** release's user-facing changes.
+- Include an **"Upgrading?"** / **"Affected?"** bullet when behaviour or migration affects existing users,
+  and a **"Nothing changes"** bullet saying who is unaffected.
+- Below them, `From vX.Y.Z:` blocks keep short summaries of recent earlier releases, newest first, so
+  someone skipping versions sees what they missed. Drop the oldest once they stop being useful.
 - Close with links: `[CHANGELOG](CHANGELOG.md)` · `[release notes](…/releases/tag/vX.Y.Z)`.
 - **Update this every release** — version in the heading, body, and the release-notes link
   must all match the new tag.
@@ -95,9 +107,11 @@ Use `<details><summary>…</summary>` for long optional snippets so the section 
 - One `### Step N — <name>` subsection per wizard step. **Each step leads with a
   screenshot of that wizard page**, then a **field table**
   (`| Field | Default | Description |`, drop the Default column where it doesn't apply).
-- Mark conditional steps in the heading (e.g. "(only if the portal asks for a code)").
+- Mark conditional steps in the heading (e.g. "(only if the portal asks for a code)",
+  "(only if your login holds more than one property)").
 - `### Options` for the options flow, same field-table shape.
 - `### Re-authentication` describing the reauth card and its steps.
+- `### Reconfigure` describing what it replaces and what it keeps (entities, history, the chosen property).
 - End with any operational ⚠️/heads-up call-outs.
 
 Keep step numbers and field names in lockstep with `config_flow.py`/`strings.json`.
@@ -117,7 +131,17 @@ under `images/`. Swap each placeholder for a real screenshot of that page:
 ### Step 3 — One-time code
 ![Step 3 — One-time code](images/config-step3-code.png)
 <!-- placeholder: capture the code entry page -->
+
+### Step 4 — Choose the property
+![Step 4 — Choose the property](images/config-step4-property.png)
+<!-- placeholder: capture the property drop-down (a login with two properties); blur the addresses -->
+
+### Step 5 — Import history
+![Step 5 — Import history](images/config-step5-history.png)
+<!-- placeholder: capture the installation-date page -->
 ```
+
+Screenshots must not show personal data: blur addresses, email addresses and account numbers.
 
 ## 7. How it works — *Required*
 
@@ -126,35 +150,65 @@ under `images/`. Swap each placeholder for a real screenshot of that page:
 - Link out to `DESIGN_DOCUMENT.md` for the protocol and statistics design.
 - `### Energy dashboard` subsection: which statistic to add and why not the sensor.
 
-## 8. Sensors — *Required*
+## 8. Entities — *Required*
 
-Single table `| Sensor | Unit | Description |` listing every entity the integration
-creates. Note diagnostic-only entities and any disabled by default.
-Keep in sync with `sensor.py`.
+Single table `| Sensor | Unit | Description |` listing every sensor the integration
+creates, then the **Update now** button. Note diagnostic-only entities, any disabled by default, and
+any that only exist on some properties (the recycled-water sensors). Keep in sync with `sensor.py`
+and `button.py`.
 
 ## 9. Services — *Required*
 
 Single table `| Service | Description |` of every registered service
 (`<domain>.<service>`). Keep in sync with `services.yaml` / `__init__.py`.
 
-## 10. Standalone tools — *Optional*
+## 10. Use cases — *Required*
+
+Bold-lead-in bullets of what people actually do with the data (Energy dashboard, leak alerts,
+consumption targets, long-term records), each one sentence on how.
+
+## 11. Automation examples — *Required*
+
+A bold one-line description of each example followed by a fenced `yaml` block that works as pasted
+(real entity IDs, no placeholders the user must spot). Keep sensor names in sync with section 8.
+
+## 12. Known limitations — *Required*
+
+Bold-lead-in bullets of what the integration can't do and why (data latency, hourly resolution,
+one login and one property, what the portal does not expose). Say what the user can do about each
+where there is something.
+
+## 13. Troubleshooting — *Required*
+
+`| Symptom | What it means | What to do |` table for the common failures, followed by how to turn on
+debug logging and what the log and **diagnostics** do and don't contain, so users can attach them to an
+issue safely.
+
+## 14. Standalone tools — *Optional*
 
 Present only while the repository ships user-facing CLIs. Describe each tool, show a fenced
 `bash` usage example, and note requirements. Use `### <tool>` subsections when there is more
 than one.
 
-## 11. Roadmap — *Optional*
+## 15. Roadmap — *Optional*
 
 Short bulleted list of planned/in-progress work with status, linking
 `DESIGN_DOCUMENT.md#9-open-items` for the full list. Drop the section if there's nothing
 public to promise.
 
-## 12. Compatibility — *Required*
+## 16. Compatibility — *Required*
 
 `| Component | Version |` table: Home Assistant min version, Python, and any
 key runtime dep. Keep versions aligned with `manifest.json` / `hacs.json`.
 
-## 13. License — *Required*
+## 17. Home Assistant quality scale — *Required*
+
+What the quality scale is, that a custom integration can only self-assess, the tier claimed (or why
+none is), and one bold-lead-in paragraph per tier summarising which rules pass, which are open and
+which don't apply. Link `custom_components/sew_water/quality_scale.yaml` for the rule-by-rule record
+and keep the two in sync. Use a `> [!NOTE]` block for any rule that blocks a tier.
+
+## 18. License — *Required*
 
 One line naming the license and linking `LICENSE`.
 
@@ -171,5 +225,5 @@ One line naming the license and linking `LICENSE`.
   `config-stepN-<slug>.png` for each wizard step. Every wizard step carries a screenshot.
 - **Plain language first** — defer protocol and internals to `DESIGN_DOCUMENT.md`.
 - **Release sync**: on every release update the version-bearing bits (badges resolve
-  automatically; the "What's new" heading/body/link do not) and re-check the Sensors,
-  Services, Configuration and Compatibility tables against the code.
+  automatically; the "What's new" heading/body/link do not) and re-check the Entities,
+  Services, Configuration, Compatibility and quality-scale sections against the code.
