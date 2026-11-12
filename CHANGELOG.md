@@ -3,7 +3,10 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.3.1] — 2026-11-12
+
+Same code as the 2.3.1b1 beta, confirmed by the reporter of #16. Nothing changes for a login with one
+property that has a digital meter.
 
 ### Fixed
 - A login that holds more than one property with a digital meter, such as a home and an investment

@@ -35,7 +35,13 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.3.0
+## 🆕 What's new in v2.3.1
+
+- **Choose your property** ([#16](https://github.com/JimboHamez/ha-sew-water/issues/16), thanks [@Oscar2024](https://github.com/Oscar2024)). If your login holds more than one property with a digital meter, such as your home and an investment property, setup now asks which one to read, with a drop-down of the addresses. Earlier versions took the first one the portal listed, which could be a property with no usage, leaving the sensors at *Unknown* / 0.00 L. Re-authentication and Reconfigure keep your choice.
+- **Affected?** Remove the integration, delete `sew_water:water_usage_mains` in *Developer tools → Statistics* (it holds the wrong property's 0 L days), then add it again and pick your property.
+- **One property? Nothing changes.** The addresses are shown only during setup; they are not stored, logged or included in diagnostics.
+
+From v2.3.0:
 
 - **Recycled-water meters** ([#15](https://github.com/JimboHamez/ha-sew-water/pull/15), thanks [@businesssuccess](https://github.com/businesssuccess)). A property with a recycled-water meter now gets a second statistic, `sew_water:water_usage_recycled`, to add as another water source in the Energy dashboard, plus *Recycled daily usage* and *Recycled total usage* sensors.
 - **Fix for properties with both meters:** earlier versions could pick the recycled meter and import it as mains water. The integration now tells them apart by serial (recycled serials start with `R`); on the first start after updating it switches to the mains meter and, if needed, rebuilds `sew_water:water_usage_mains`. No new login code is needed.
@@ -73,7 +79,7 @@ From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/Ji
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.3.0).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.3.1).
 
 ---
 
