@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
+import html
 from html.parser import HTMLParser
 from http.cookies import SimpleCookie
 import json
@@ -219,6 +220,23 @@ class AccountIds:
     meter_id: str
     meter_serial: str | None = None
     kind: MeterKind = METER_KIND_MAINS
+
+
+@dataclass(frozen=True)
+class SewProperty:
+    """A billing account on the login whose property has at least one digital meter.
+
+    Attributes:
+        billing_account_id: ``Billing_Account__c`` record ID (``a08...``).
+        meters: The property's digital meters, mains first and otherwise in the portal's order.
+        address: The property's street address for the setup flow's picker, or None when the portal gave
+            none. It is personal data: shown to the user once and never stored or logged, so it is left
+            out of ``repr`` to keep it out of log lines and tracebacks.
+    """
+
+    billing_account_id: str
+    meters: tuple[AccountIds, ...]
+    address: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -451,6 +469,26 @@ def meter_kind(serial: str | None) -> MeterKind:
     if serial and serial.strip().casefold().startswith(_RECYCLED_SERIAL_PREFIX):
         return METER_KIND_RECYCLED
     return METER_KIND_MAINS
+
+
+_ADDRESS_BREAK_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+_ADDRESS_TAG_RE = re.compile(r"<[^>]*>")
+
+
+def _format_address(raw: Any) -> str | None:
+    """Turn the portal's ``Property_Address__c`` (lines joined by ``<br>``) into one display line.
+
+    Args:
+        raw: The field's value as the portal sent it.
+
+    Returns:
+        The address with its lines joined by commas, or None when there is nothing to show.
+    """
+    if not isinstance(raw, str):
+        return None
+    text = _ADDRESS_TAG_RE.sub("", _ADDRESS_BREAK_RE.sub("\n", raw))
+    lines = [" ".join(html.unescape(line).split()) for line in text.splitlines()]
+    return ", ".join(line for line in lines if line) or None
 
 
 def mask_identifier(value: str | None) -> str:
@@ -978,17 +1016,18 @@ class SewClient:
 
     # --------------------------------------------------------------------- data
 
-    async def async_discover_meters(self) -> list[AccountIds]:
-        """Find every digital meter on the logged-in customer's billing account.
+    async def async_list_properties(self) -> list[SewProperty]:
+        """List the billing accounts on the login whose property has a digital meter.
 
         Mirrors the usage page's own start-up call, ``getBillingAccountsAndMetersForUser``, which returns
-        the user's billing accounts and the meters on their properties. A login can hold several
-        accounts; the first account whose property has a digital meter is used. Its property can have a
-        mains (potable) meter and a recycled-water meter, which the portal may list in either order.
+        the user's billing accounts and the meters on their properties. A login can hold several accounts,
+        for example a home and an investment property, and the portal's order says nothing about which
+        one the user pays usage for. A property can have a mains (potable) meter and a recycled-water
+        meter, which the portal may list in either order.
 
         Returns:
-            The IDs of each digital meter on that account, mains meters first and otherwise in the
-            portal's order, each with its ``kind``.
+            One entry per account with a digital meter, in the portal's order, each with its meters
+            mains first.
 
         Raises:
             SewAuthError: If not logged in.
@@ -1013,44 +1052,79 @@ class SewClient:
             for m in _records(value.get("meters"))
             if isinstance(m.get("Id"), str) and m.get("Is_Digital__c") is True and m.get("Property__c")
         ]
-        # Every (account, digital meter) pairing, in the portal's account order and then its meter order.
-        candidates = [(a, m) for a in accounts for m in meters if m["Property__c"] == a.get("Property__c")]
-        if not candidates:
+        properties: list[SewProperty] = []
+        seen: set[str] = set()
+        for account in accounts:
+            if account["Id"] in seen:
+                continue
+            seen.add(account["Id"])
+            found = [
+                AccountIds(
+                    billing_account_id=account["Id"],
+                    meter_id=str(meter["Id"]),
+                    meter_serial=str(meter["Name"]) if meter.get("Name") else None,
+                    kind=meter_kind(meter.get("Name")),
+                )
+                for meter in meters
+                if meter["Property__c"] == account.get("Property__c")
+            ]
+            if not found:
+                continue
+            # A stable sort, so meters of the same kind keep the portal's order.
+            found.sort(key=lambda ids: ids.kind != METER_KIND_MAINS)
+            if len(found) == 1 and found[0].kind != METER_KIND_MAINS:
+                # The serial prefix only tells two meters on one property apart. A lone meter stays the mains
+                # meter, as every earlier version treated it, so a mains serial that happens to start with R
+                # cannot move an existing installation's history to the recycled statistic.
+                found[0] = replace(found[0], kind=METER_KIND_MAINS)
+            properties.append(
+                SewProperty(
+                    billing_account_id=account["Id"],
+                    meters=tuple(found),
+                    address=_format_address(account.get("Property_Address__c")),
+                )
+            )
+        if not properties:
             raise SewProtocolError(f"No digital meter found for the {len(accounts)} billing account(s) on this login")
-        account = candidates[0][0]
-        found = [
-            AccountIds(
-                billing_account_id=str(account["Id"]),
-                meter_id=str(meter["Id"]),
-                meter_serial=str(meter["Name"]) if meter.get("Name") else None,
-                kind=meter_kind(meter.get("Name")),
-            )
-            for a, meter in candidates
-            if a is account
-        ]
-        # A stable sort, so meters of the same kind keep the portal's order.
-        found.sort(key=lambda ids: ids.kind != METER_KIND_MAINS)
-        if len(found) == 1 and found[0].kind != METER_KIND_MAINS:
-            # The serial prefix only tells two meters on one property apart. A lone meter stays the mains
-            # meter, as every earlier version treated it, so a mains serial that happens to start with R
-            # cannot move an existing installation's history to the recycled statistic.
-            found[0] = replace(found[0], kind=METER_KIND_MAINS)
-        if len(candidates) > 1:
-            # Identifiers stay out of the info line; the debug line lists them masked so the choice can be checked.
-            _LOGGER.info(
-                "Found %d digital meters across %d billing account(s); using the first account's %d mains and %d "
-                "recycled meter(s)",
-                len(candidates),
-                len({a["Id"] for a, _ in candidates}),
-                sum(1 for ids in found if ids.kind == METER_KIND_MAINS),
-                sum(1 for ids in found if ids.kind == METER_KIND_RECYCLED),
-            )
-            _LOGGER.debug(
-                "Digital meter serials in portal order: %s; using %s",
-                [mask_identifier(m.get("Name")) for _, m in candidates],
-                [f"{mask_identifier(ids.meter_serial)} ({ids.kind})" for ids in found],
-            )
-        return found
+        # Identifiers stay out of the info line and addresses out of every line; the debug line lists the
+        # serials masked so the meters can be checked.
+        _LOGGER.debug(
+            "Found %d billing account(s) with a digital meter; meter serials: %s",
+            len(properties),
+            [[f"{mask_identifier(ids.meter_serial)} ({ids.kind})" for ids in prop.meters] for prop in properties],
+        )
+        return properties
+
+    async def async_discover_meters(self, billing_account_id: str | None = None) -> list[AccountIds]:
+        """Find every digital meter on one billing account.
+
+        Args:
+            billing_account_id: The account to read, as chosen at setup. None takes the first account
+                with a digital meter that the portal lists.
+
+        Returns:
+            The IDs of each digital meter on that account, mains meters first and otherwise in the
+            portal's order, each with its ``kind``.
+
+        Raises:
+            SewAuthError: If not logged in.
+            SewProtocolError: If no account with a digital meter can be found, or the given account is
+                not on this login or has no digital meter.
+        """
+        properties = await self.async_list_properties()
+        if billing_account_id is None:
+            chosen = properties[0]
+            if len(properties) > 1:
+                _LOGGER.info(
+                    "Found %d billing accounts with a digital meter; using the first the portal lists",
+                    len(properties),
+                )
+        else:
+            stored = next((p for p in properties if p.billing_account_id == billing_account_id), None)
+            if stored is None:
+                raise SewProtocolError("The configured billing account has no digital meter on this login")
+            chosen = stored
+        return list(chosen.meters)
 
     async def async_discover_ids(self) -> AccountIds:
         """Find the billing account and mains meter record IDs for the logged-in customer.

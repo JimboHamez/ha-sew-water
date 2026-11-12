@@ -33,6 +33,16 @@
           "mfa_code": "Six digits; spaces and dashes are ignored."
         }
       },
+      "property": {
+        "title": "Choose the property",
+        "description": "Your login holds more than one property with a digital meter. Choose the one whose water usage you want in Home Assistant, usually the property you pay usage charges for. An investment property whose tenant pays for water shows no readings. The address is only shown here; it is not stored.",
+        "data": {
+          "property": "Property"
+        },
+        "data_description": {
+          "property": "The property address as the portal lists it."
+        }
+      },
       "history": {
         "title": "Import history",
         "description": "Optionally enter the date your digital meter was installed. Everything from that day is imported into long-term statistics in the background after setup; leave it blank to import the last 90 days only. You can always import more later with the sew_water.import_from_date action.",
@@ -83,6 +93,7 @@
       "unknown": "The portal responded unexpectedly. Check the logs for details."
     },
     "abort": {
+      "account_not_found": "The property this entry was set up with is no longer on this login. Remove the integration and add it again to choose a property.",
       "already_configured": "This account is already configured.",
       "cannot_connect": "Could not reach the South East Water portal.",
       "invalid_auth": "The portal rejected the session before setup could finish.",

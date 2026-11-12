@@ -3,6 +3,19 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- A login that holds more than one property with a digital meter, such as a home and an investment
+  property, could read the wrong one and show *Unknown* / 0.00 L forever
+  ([#16](https://github.com/JimboHamez/ha-sew-water/issues/16)). Earlier versions always took the first
+  property the portal listed. Setup now shows a **Choose the property** step with a drop-down of the
+  property addresses. Logins with one such property see no new step.
+- Re-authentication and **Reconfigure** keep the property chosen at setup instead of picking again.
+
+If you are affected, remove the integration and add it again to choose the right property. The addresses
+are only shown during setup; they are not stored, logged or included in diagnostics.
+
 ## [2.3.0] — 2026-11-09
 
 Recycled-water meters, contributed by [@businesssuccess](https://github.com/businesssuccess) in

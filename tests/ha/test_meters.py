@@ -241,7 +241,7 @@ async def test_upgrade_replaces_recycled_meter_and_rebuilds_mains_statistic(
 
     # The meters were listed once with a client that may send the lookup, then the entry was corrected.
     assert ("integration-discovery", False) in two_meters.constructed
-    assert two_meters.calls.count(("discover_meters", None)) == 1
+    assert two_meters.calls.count(("discover_meters", BILLING_ACCOUNT_ID)) == 1
     assert entry.data[CONF_METER_ID] == METER_ID
     assert entry.data[CONF_METER_SERIAL] == METER_SERIAL
     assert entry.data[CONF_BILLING_ACCOUNT_ID] == BILLING_ACCOUNT_ID
@@ -272,7 +272,7 @@ async def test_upgrade_replaces_recycled_meter_and_rebuilds_mains_statistic(
     # A reload does not list the meters or clear anything again.
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    assert two_meters.calls.count(("discover_meters", None)) == 1
+    assert two_meters.calls.count(("discover_meters", BILLING_ACCOUNT_ID)) == 1
     assert len(await read_rows(hass)) == BACKFILL_DAYS * 24
 
 

@@ -23,6 +23,7 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
     SelectSelectorMode,
@@ -47,6 +48,7 @@ from .const import (
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
     CONF_POLL_TIME,
+    CONF_PROPERTY,
     CONF_SCAN_INTERVAL,
     DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
@@ -55,7 +57,14 @@ from .const import (
     MIN_SCAN_INTERVAL,
 )
 from .coordinator import SewConfigEntry, meters_to_data
-from .sew_client import SewAuthError, SewClient, SewConnectionError, SewError, SewLoginUnexplainedError
+from .sew_client import (
+    SewAuthError,
+    SewClient,
+    SewConnectionError,
+    SewError,
+    SewLoginUnexplainedError,
+    SewProperty,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +120,8 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         self._password: str | None = None
         self._channels: tuple[str, ...] = ()
         self._entry_data: dict[str, Any] | None = None
+        # Held only while the flow is open, for the property picker; the addresses are never stored.
+        self._properties: list[SewProperty] = []
 
     @staticmethod
     @callback
@@ -170,10 +181,16 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         return None
 
     async def _async_finish(self) -> ConfigFlowResult:
-        """Discover the account's meters, capture the session and create or update the entry."""
+        """List the login's properties, then update the entry or move on to choosing a property."""
         assert self._client is not None and self._username is not None
+        await self.async_set_unique_id(self._username.lower())
+        reauth = self.source in (SOURCE_REAUTH, SOURCE_RECONFIGURE)
+        if reauth:
+            self._abort_if_unique_id_mismatch(reason="wrong_account")
+        else:
+            self._abort_if_unique_id_configured()
         try:
-            meters = await self._client.async_discover_meters()
+            properties = await self._client.async_list_properties()
         except SewAuthError:
             return self.async_abort(reason="invalid_auth")
         except SewConnectionError:
@@ -181,30 +198,51 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         except SewError:
             _LOGGER.exception("Could not discover the billing account or meter")
             return self.async_abort(reason="unknown")
-        # Mains first, so CONF_METER_ID keeps naming the mains meter as it always has.
-        mains = meters[0]
-        session_data: dict[str, Any] = {
-            CONF_BILLING_ACCOUNT_ID: mains.billing_account_id,
+        if reauth:
+            entry = self._get_reauth_entry() if self.source == SOURCE_REAUTH else self._get_reconfigure_entry()
+            session_data = self._session_data()
+            if CONF_METERS in entry.data:
+                # Keep the property chosen at setup. The portal's order is no guide to it, so falling back to
+                # the first property could silently switch a home to an investment property.
+                stored = entry.data[CONF_BILLING_ACCOUNT_ID]
+                chosen = next((p for p in properties if p.billing_account_id == stored), None)
+                if chosen is None:
+                    return self.async_abort(reason="account_not_found")
+                session_data |= self._meter_data(chosen)
+            # Otherwise the entry is from before 2.3 and may hold the recycled meter, whose readings then sit in
+            # the mains statistic. Its meter keys are left for the coordinator's one-time upgrade after the
+            # reload, which lists that account's meters and repairs the statistic.
+            return self.async_update_reload_and_abort(entry, data_updates=session_data)
+        if len(properties) == 1:
+            return await self._async_use_property(properties[0])
+        self._properties = properties
+        return await self.async_step_property()
+
+    def _session_data(self) -> dict[str, Any]:
+        """Return the credentials and the session's cookies for the entry."""
+        assert self._client is not None
+        return {
             CONF_COOKIES: self._client.export_cookies(),
-            CONF_METER_ID: mains.meter_id,
-            CONF_METER_SERIAL: mains.meter_serial,
-            CONF_METERS: meters_to_data(meters),
             CONF_PASSWORD: self._password,
             CONF_USERNAME: self._username,
         }
-        await self.async_set_unique_id(self._username.lower())
-        if self.source in (SOURCE_REAUTH, SOURCE_RECONFIGURE):
-            self._abort_if_unique_id_mismatch(reason="wrong_account")
-            entry = self._get_reauth_entry() if self.source == SOURCE_REAUTH else self._get_reconfigure_entry()
-            if CONF_METERS not in entry.data:
-                # An entry from before 2.3 may hold the recycled meter, whose readings then sit in the mains
-                # statistic. Leave its meter keys for the coordinator's one-time upgrade after the reload,
-                # which compares them with the account's meters and repairs the statistic.
-                for key in (CONF_BILLING_ACCOUNT_ID, CONF_METER_ID, CONF_METER_SERIAL, CONF_METERS):
-                    session_data.pop(key)
-            return self.async_update_reload_and_abort(entry, data_updates=session_data)
-        self._abort_if_unique_id_configured()
-        self._entry_data = session_data
+
+    @staticmethod
+    def _meter_data(chosen: SewProperty) -> dict[str, Any]:
+        """Return the entry keys naming a property's billing account and meters, without its address."""
+        # Mains first, so CONF_METER_ID keeps naming the mains meter as it always has.
+        mains = chosen.meters[0]
+        return {
+            CONF_BILLING_ACCOUNT_ID: chosen.billing_account_id,
+            CONF_METER_ID: mains.meter_id,
+            CONF_METER_SERIAL: mains.meter_serial,
+            CONF_METERS: meters_to_data(chosen.meters),
+        }
+
+    async def _async_use_property(self, chosen: SewProperty) -> ConfigFlowResult:
+        """Remember the chosen property's IDs for the new entry and ask for the history start."""
+        self._properties = []
+        self._entry_data = self._session_data() | self._meter_data(chosen)
         return await self.async_step_history()
 
     # --------------------------------------------------------------------- steps
@@ -267,6 +305,24 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 return await self._async_finish()
         return self.async_show_form(step_id="mfa_code", data_schema=STEP_CODE_SCHEMA, errors=errors)  # type: ignore[arg-type]
+
+    async def async_step_property(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask which property to read when the login holds more than one with a digital meter."""
+        if user_input is not None:
+            return await self._async_use_property(self._properties[int(user_input[CONF_PROPERTY])])
+        # Option values are list positions, so no record ID reaches the browser.
+        options = [
+            SelectOptionDict(value=str(index), label=prop.address or f"Property {index + 1}")
+            for index, prop in enumerate(self._properties)
+        ]
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_PROPERTY): SelectSelector(
+                    SelectSelectorConfig(options=options, mode=SelectSelectorMode.DROPDOWN, sort=False)
+                )
+            }
+        )
+        return self.async_show_form(step_id="property", data_schema=schema)  # type: ignore[arg-type]
 
     async def async_step_history(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Optionally take the meter's installation date; the history is imported after setup."""

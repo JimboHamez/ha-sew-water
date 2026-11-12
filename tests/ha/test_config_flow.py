@@ -24,29 +24,43 @@ from custom_components.sew_water.const import (
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
     CONF_POLL_TIME,
+    CONF_PROPERTY,
     CONF_SCAN_INTERVAL,
     DOMAIN,
     ENTRY_TITLE,
 )
 from custom_components.sew_water.sew_client import (
+    AccountIds,
     LoginResult,
     SewAuthError,
     SewConnectionError,
     SewLoginUnexplainedError,
+    SewProperty,
     SewProtocolError,
 )
 
 from .conftest import (
+    ADDRESS,
     BILLING_ACCOUNT_ID,
     COOKIES,
+    IDS,
     METER_ID,
     METER_SERIAL,
     PASSWORD,
+    RECYCLED_IDS,
+    RECYCLED_METER_ID,
+    RECYCLED_SERIAL,
     USERNAME,
     FakeClient,
 )
 
 CREDENTIALS = {CONF_USERNAME: USERNAME, CONF_PASSWORD: PASSWORD}
+# A second property on the same login, such as an investment property, which the portal can list first.
+OTHER_ACCOUNT_ID = "a0890000008OTHRAAA"
+OTHER_IDS = AccountIds(billing_account_id=OTHER_ACCOUNT_ID, meter_id="a1K90000000OTHREAC", meter_serial="SAHL999999")
+OTHER_ADDRESS = "9 INVESTMENT ROAD, ELSEWHERE VIC 3999"
+OTHER_PROPERTY = SewProperty(OTHER_ACCOUNT_ID, (OTHER_IDS,), OTHER_ADDRESS)
+HOME_PROPERTY = SewProperty(BILLING_ACCOUNT_ID, (IDS,), ADDRESS)
 
 
 async def start_user_flow(hass: HomeAssistant) -> dict[str, Any]:
@@ -265,6 +279,80 @@ async def test_discovery_errors_abort(
     assert result["reason"] == reason
 
 
+def picker_options(result: dict[str, Any]) -> list[dict[str, str]]:
+    """Return the property picker's options from a form result."""
+    (selector,) = result["data_schema"].schema.values()
+    return list(selector.config["options"])
+
+
+async def test_several_properties_ask_which_one_to_read(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    """The portal's first property may be an investment property with no readings (issue #16)."""
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    fake_client.properties = [OTHER_PROPERTY, HOME_PROPERTY]
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "property"
+    # Addresses label the options in the portal's order; the values are positions, not record IDs.
+    assert picker_options(result) == [
+        {"value": "0", "label": OTHER_ADDRESS},
+        {"value": "1", "label": ADDRESS},
+    ]
+
+    result = await submit(hass, result["flow_id"], {CONF_PROPERTY: "1"})
+    assert result["step_id"] == "history"
+    result = await submit(hass, result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    data = result["data"]
+    assert data[CONF_BILLING_ACCOUNT_ID] == BILLING_ACCOUNT_ID
+    assert data[CONF_METER_ID] == METER_ID
+    assert data[CONF_METERS] == [{"meter_id": METER_ID, "meter_kind": "mains", "meter_serial": METER_SERIAL}]
+    # Neither address, nor anything about the other property, is kept.
+    assert CONF_PROPERTY not in data
+    stored = repr(data)
+    for leaked in (ADDRESS, OTHER_ADDRESS, "EXAMPLE", "INVESTMENT", OTHER_ACCOUNT_ID, OTHER_IDS.meter_id):
+        assert leaked not in stored
+
+
+async def test_chosen_property_keeps_its_recycled_meter(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    """Picking a property stores all of its meters, so recycled water works as it does with one property."""
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    fake_client.properties = [OTHER_PROPERTY, SewProperty(BILLING_ACCOUNT_ID, (IDS, RECYCLED_IDS), ADDRESS)]
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    result = await submit(hass, result["flow_id"], {CONF_PROPERTY: "1"})
+    result = await submit(hass, result["flow_id"], {})
+    data = result["data"]
+    assert data[CONF_BILLING_ACCOUNT_ID] == BILLING_ACCOUNT_ID
+    assert data[CONF_METER_ID] == METER_ID
+    assert data[CONF_METERS] == [
+        {"meter_id": METER_ID, "meter_kind": "mains", "meter_serial": METER_SERIAL},
+        {"meter_id": RECYCLED_METER_ID, "meter_kind": "recycled", "meter_serial": RECYCLED_SERIAL},
+    ]
+
+
+async def test_property_without_an_address_is_numbered(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    fake_client.properties = [SewProperty(OTHER_ACCOUNT_ID, (OTHER_IDS,)), HOME_PROPERTY]
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    assert picker_options(result) == [{"value": "0", "label": "Property 1"}, {"value": "1", "label": ADDRESS}]
+    result = await submit(hass, result["flow_id"], {CONF_PROPERTY: "0"})
+    result = await submit(hass, result["flow_id"], {})
+    assert result["data"][CONF_BILLING_ACCOUNT_ID] == OTHER_ACCOUNT_ID
+
+
+async def test_one_property_skips_the_picker(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    result = await start_user_flow(hass)
+    result = await submit(hass, result["flow_id"], CREDENTIALS)
+    assert result["step_id"] == "history"
+
+
+def test_property_address_is_left_out_of_repr() -> None:
+    assert ADDRESS not in repr(HOME_PROPERTY)
+
+
 async def test_second_entry_is_refused(hass: HomeAssistant, mock_config_entry: MockConfigEntry) -> None:
     """Every entry writes the same external statistic, so only one entry is allowed."""
     mock_config_entry.add_to_hass(hass)
@@ -302,6 +390,33 @@ async def test_reauth_needs_only_a_new_code(
     assert ("login", (USERNAME, PASSWORD)) in fake_client.calls
     assert mock_config_entry.data[CONF_COOKIES][0]["value"] == "NEW"
     assert mock_config_entry.data[CONF_PASSWORD] == PASSWORD
+
+
+async def test_reauth_keeps_the_property_chosen_at_setup(
+    hass: HomeAssistant, fake_client: FakeClient, mock_config_entry: MockConfigEntry
+) -> None:
+    """Reauth must not fall back to the portal's first property."""
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    fake_client.properties = [OTHER_PROPERTY, HOME_PROPERTY]
+    result = await start_reauth(hass, mock_config_entry)
+    result = await submit(hass, result["flow_id"], {})
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert mock_config_entry.data[CONF_BILLING_ACCOUNT_ID] == BILLING_ACCOUNT_ID
+    assert mock_config_entry.data[CONF_METER_ID] == METER_ID
+    assert ADDRESS not in repr(mock_config_entry.data)
+
+
+async def test_reauth_aborts_when_the_chosen_property_is_gone(
+    hass: HomeAssistant, fake_client: FakeClient, mock_config_entry: MockConfigEntry
+) -> None:
+    fake_client.login_result = LoginResult(mfa_required=False, channels=())
+    fake_client.properties = [OTHER_PROPERTY]
+    result = await start_reauth(hass, mock_config_entry)
+    result = await submit(hass, result["flow_id"], {})
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "account_not_found"
+    assert mock_config_entry.data[CONF_BILLING_ACCOUNT_ID] == BILLING_ACCOUNT_ID
 
 
 async def test_reauth_with_rejected_password_asks_for_a_new_one(

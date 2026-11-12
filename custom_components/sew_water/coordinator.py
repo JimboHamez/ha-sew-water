@@ -492,11 +492,11 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
     async def _async_upgrade_meters(self) -> None:
         """List the account's meters once for an entry created before recycled meters were recognised.
 
-        Those entries hold only the meter discovery picked, the first digital meter the portal listed,
-        which on a property with recycled water can be the recycled meter; its readings then went into
-        the mains statistic. This stores every meter, points ``CONF_METER_ID`` at the mains meter and, if
-        the stored meter was the recycled one, clears the mains statistic so the import that follows
-        (the backfill window, then the installation-date backfill) rebuilds it from mains readings.
+        Those entries hold only the meter discovery picked, the first digital meter the portal listed for
+        the stored billing account, which on a property with recycled water can be the recycled meter; its
+        readings then went into the mains statistic. This stores every meter, points ``CONF_METER_ID`` at the
+        mains meter and, if the stored meter was the recycled one, clears the mains statistic so the import
+        that follows (the backfill window, then the installation-date backfill) rebuilds it from mains readings.
 
         This runs here rather than in ``async_migrate_entry`` because it needs the portal: a migration
         cannot use the entry's session before setup, and a failed migration leaves the entry in
@@ -510,7 +510,10 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         if CONF_METERS in self.config_entry.data or self.discovery_client is None:
             return
         try:
-            meters = await self.discovery_client.async_discover_meters()
+            # The stored account, not the portal's first: a login can hold several properties.
+            meters = await self.discovery_client.async_discover_meters(
+                str(self.config_entry.data[CONF_BILLING_ACCOUNT_ID])
+            )
         except SewProtocolError as err:
             # Not worth blocking the integration over: the stored meter keeps working, and the lookup is
             # tried again on the next load.

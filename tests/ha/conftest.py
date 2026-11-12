@@ -28,7 +28,7 @@ from custom_components.sew_water.const import (
     ENTRY_TITLE,
 )
 from custom_components.sew_water.coordinator import meters_to_data
-from custom_components.sew_water.sew_client import AccountIds, DailyUsage, LoginResult
+from custom_components.sew_water.sew_client import AccountIds, DailyUsage, LoginResult, SewProperty
 
 USERNAME = "user@example.com"
 PASSWORD = "hunter2"
@@ -44,6 +44,7 @@ RECYCLED_SERIAL = "RAHA000000"
 RECYCLED_IDS = AccountIds(
     billing_account_id=BILLING_ACCOUNT_ID, meter_id=RECYCLED_METER_ID, meter_serial=RECYCLED_SERIAL, kind="recycled"
 )
+ADDRESS = "1 EXAMPLE STREET, EXAMPLEVILLE VIC 3000"
 # Import windows used in tests; the real 90/30-day windows would write thousands of hourly rows per test.
 BACKFILL_DAYS = 6
 TRAILING_WINDOW_DAYS = 3
@@ -77,6 +78,8 @@ class FakeClient:
         self.ids = IDS
         # What async_discover_meters returns, already in the client's mains-first order.
         self.meters: list[AccountIds] = [IDS]
+        # What async_list_properties returns; None means one property holding ``meters``.
+        self.properties: list[SewProperty] | None = None
         self.exported_cookies: list[dict[str, Any]] = list(COOKIES)
         self.imported_cookies: list[dict[str, Any]] | None = None
         self.litres_per_hour: Callable[[date], int] = lambda _day: 10
@@ -125,9 +128,18 @@ class FakeClient:
             raise self.discover_error
         return self.ids
 
-    async def async_discover_meters(self) -> list[AccountIds]:
+    async def async_list_properties(self) -> list[SewProperty]:
+        """Return the scripted properties."""
+        self.calls.append(("list_properties", None))
+        if self.discover_error:
+            raise self.discover_error
+        if self.properties is not None:
+            return list(self.properties)
+        return [SewProperty(self.meters[0].billing_account_id, tuple(self.meters), ADDRESS)]
+
+    async def async_discover_meters(self, billing_account_id: str | None = None) -> list[AccountIds]:
         """Return the scripted meters."""
-        self.calls.append(("discover_meters", None))
+        self.calls.append(("discover_meters", billing_account_id))
         if self.discover_error:
             raise self.discover_error
         return list(self.meters)
