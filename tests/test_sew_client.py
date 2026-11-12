@@ -23,6 +23,7 @@ from sew_client import (  # loaded from file by conftest.py, without importing t
     SewClient,
     SewConnectionError,
     SewLoginUnexplainedError,
+    SewProperty,
     SewProtocolError,
     SewRequestRefusedError,
     mask_identifier,
@@ -53,6 +54,7 @@ from .conftest import (
 AURA_URL = re.compile(rf"^{re.escape(BASE)}/s/sfsites/aura(\?.*)?$")
 FRONTDOOR = f"{BASE}/secur/frontdoor.jsp?sid=FAKE-SID&retURL=%2F"
 IDS = AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID)
+IDS_WITH_SERIAL = AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
 
 
 def posted_form(mocked: aioresponses, url_pattern: str | re.Pattern[str], index: int = 0) -> dict[str, str]:
@@ -442,15 +444,11 @@ async def test_discover_ids_with_two_digital_meters_on_one_property_uses_the_fir
     with patch.object(sew_client._LOGGER, "info") as info, patch.object(sew_client._LOGGER, "debug") as debug:
         ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
-    (info_line,) = debug_lines(info)
-    assert info_line == (
-        "Found 2 digital meters across 1 billing account(s); using the first account's 2 mains and 0 recycled meter(s)"
-    )
-    # Serials are identifiers, so they appear only at debug level.
-    assert METER_SERIAL not in info_line and "SAHL999999" not in info_line
-    # Even at debug level they are masked to their last four characters.
+    # One account: nothing to choose between, so no info line.
+    assert debug_lines(info) == []
+    # Serials are identifiers, so they appear only at debug level, masked to their last four characters.
     debug_text = "\n".join(debug_lines(debug))
-    assert "['***0000', '***9999']; using ['***0000 (mains)', '***9999 (mains)']" in debug_text
+    assert "meter serials: [['***0000 (mains)', '***9999 (mains)']]" in debug_text
     assert METER_SERIAL not in debug_text and "SAHL999999" not in debug_text
 
 
@@ -465,9 +463,7 @@ async def test_discover_ids_with_a_digital_meter_on_each_account_uses_the_first_
     with patch.object(sew_client._LOGGER, "info") as info:
         ids = await client.async_discover_ids()
     assert ids == AccountIds(billing_account_id=BILLING_ACCOUNT_ID, meter_id=METER_ID, meter_serial=METER_SERIAL)
-    assert debug_lines(info) == [
-        "Found 2 digital meters across 2 billing account(s); using the first account's 1 mains and 0 recycled meter(s)"
-    ]
+    assert debug_lines(info) == ["Found 2 billing accounts with a digital meter; using the first the portal lists"]
 
 
 async def test_discover_ids_accepts_json_strings_and_missing_serial(client: SewClient, mocked: aioresponses) -> None:
@@ -520,11 +516,9 @@ async def test_discovery_with_recycled_meter_listed_first_returns_mains(
     with patch.object(sew_client._LOGGER, "info") as info, patch.object(sew_client._LOGGER, "debug") as debug:
         ids = await client.async_discover_ids()
     assert ids == MAINS
-    assert debug_lines(info) == [
-        "Found 2 digital meters across 1 billing account(s); using the first account's 1 mains and 1 recycled meter(s)"
-    ]
+    assert debug_lines(info) == []
     debug_text = "\n".join(debug_lines(debug))
-    assert "['***0000', '***0000']; using ['***0000 (mains)', '***0000 (recycled)']" in debug_text
+    assert "meter serials: [['***0000 (mains)', '***0000 (recycled)']]" in debug_text
     assert METER_SERIAL not in debug_text and RECYCLED_SERIAL not in debug_text
 
 
@@ -539,6 +533,86 @@ async def test_discover_meters_returns_both_mains_first(client: SewClient, mocke
     mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
     # The second account's meter is not on the chosen account, so it is left out.
     assert await client.async_discover_meters() == [MAINS, RECYCLED]
+
+
+async def test_list_properties_gives_each_account_with_a_digital_meter_and_its_address(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    """A login can hold an investment property the portal lists first (issue #16); the user picks by address."""
+    mock_home(mocked)
+    investment = account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID)
+    investment["Property_Address__c"] = "9 INVESTMENT ROAD<BR/>ELSEWHERE  VIC 3999 &amp; CO"
+    no_digital = account_record("a0890000008NONDAAA", "a07900000000NONDAAE")
+    accounts = [investment, no_digital, account_record(), account_record()]
+    meters = [
+        meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, serial="SAHL999999"),
+        meter_record("a1K90000000NONDEAC", "a07900000000NONDAAE", digital=False),
+        meter_record(),
+    ]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    with patch.object(sew_client._LOGGER, "debug") as debug, patch.object(sew_client._LOGGER, "info") as info:
+        properties = await client.async_list_properties()
+    # Portal order, skipping the account without a digital meter and the repeated one.
+    assert properties == [
+        SewProperty(
+            OTHER_ACCOUNT_ID,
+            (AccountIds(OTHER_ACCOUNT_ID, OTHER_METER_ID, "SAHL999999"),),
+            "9 INVESTMENT ROAD, ELSEWHERE VIC 3999 & CO",
+        ),
+        SewProperty(BILLING_ACCOUNT_ID, (IDS_WITH_SERIAL,), "1 EXAMPLE STREET, EXAMPLEVILLE VIC 3000"),
+    ]
+    # Addresses are personal data: never logged, and left out of repr.
+    logged = "\n".join(debug_lines(debug) + debug_lines(info))
+    assert "EXAMPLE" not in logged and "INVESTMENT" not in logged
+    assert "EXAMPLE" not in repr(properties)
+
+
+@pytest.mark.parametrize("raw", [None, "", "<br>", " <br/> ", 42])
+async def test_list_properties_without_a_usable_address(client: SewClient, mocked: aioresponses, raw: Any) -> None:
+    mock_home(mocked)
+    account = account_record()
+    account["Property_Address__c"] = raw
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value([account], [meter_record()])))
+    (prop,) = await client.async_list_properties()
+    assert prop.address is None
+
+
+async def test_discover_meters_reads_the_given_account(client: SewClient, mocked: aioresponses) -> None:
+    """The account chosen at setup is used even when the portal lists another one first."""
+    mock_home(mocked)
+    accounts = [account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID), account_record()]
+    meters = [meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, serial="SAHL999999"), meter_record()]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    with patch.object(sew_client._LOGGER, "info") as info:
+        assert await client.async_discover_meters(BILLING_ACCOUNT_ID) == [IDS_WITH_SERIAL]
+    assert debug_lines(info) == []
+
+
+async def test_list_properties_keeps_each_propertys_recycled_meter(client: SewClient, mocked: aioresponses) -> None:
+    """Mains-first ordering and the lone-meter rule apply per property, as they did for the single account."""
+    mock_home(mocked)
+    accounts = [account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID), account_record()]
+    meters = [
+        meter_record(RECYCLED_METER_ID, serial=RECYCLED_SERIAL),
+        meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID, serial="RAHA999999"),
+        meter_record(),
+    ]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    other, home = await client.async_list_properties()
+    # The other property's only meter stays mains despite its R serial.
+    assert other.meters == (AccountIds(OTHER_ACCOUNT_ID, OTHER_METER_ID, "RAHA999999", "mains"),)
+    assert home.meters == (MAINS, RECYCLED)
+
+
+async def test_discover_meters_for_an_account_no_longer_on_the_login_is_protocol_error(
+    client: SewClient, mocked: aioresponses
+) -> None:
+    mock_home(mocked)
+    accounts = [account_record(OTHER_ACCOUNT_ID, OTHER_PROPERTY_ID)]
+    meters = [meter_record(OTHER_METER_ID, OTHER_PROPERTY_ID)]
+    mocked.post(AURA_URL, status=200, payload=aura_envelope(discovery_value(accounts, meters)))
+    with pytest.raises(SewProtocolError, match="configured billing account"):
+        await client.async_discover_meters(BILLING_ACCOUNT_ID)
 
 
 async def test_discover_meters_treats_a_lone_meter_as_mains(client: SewClient, mocked: aioresponses) -> None:

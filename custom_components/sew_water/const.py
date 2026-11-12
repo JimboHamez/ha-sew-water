@@ -25,6 +25,8 @@ CONF_METERS: Final = "meters"
 CONF_MFA_CHANNEL: Final = "mfa_channel"
 CONF_MFA_CODE: Final = "mfa_code"
 CONF_POLL_TIME: Final = "poll_time"
+# The setup flow's property picker; its value is an index into the flow's property list, never stored.
+CONF_PROPERTY: Final = "property"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 
 # Days of history imported the first time the integration runs.
