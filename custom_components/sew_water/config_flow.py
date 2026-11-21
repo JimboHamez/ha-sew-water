@@ -17,6 +17,7 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfTime, UnitOfVolume
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
     DateSelector,
@@ -40,6 +41,9 @@ import voluptuous as vol
 
 from .const import (
     CONF_BILLING_ACCOUNT_ID,
+    CONF_BILLING_DAYS,
+    CONF_BILLING_PERIOD,
+    CONF_BILLING_START,
     CONF_COOKIES,
     CONF_IMPORT_FROM,
     CONF_METER_ID,
@@ -55,11 +59,13 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_STEP_THRESHOLD,
     CONF_TARIFF,
+    DEFAULT_BILLING_DAYS,
     DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARIFF,
     DOMAIN,
     ENTRY_TITLE,
+    MAX_BILLING_DAYS,
     MIN_SCAN_INTERVAL,
     TARIFF_CUSTOM,
     TARIFF_RECYCLED,
@@ -431,11 +437,16 @@ class SewOptionsFlow(OptionsFlowWithReload):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and save the polling options and the tariff; custom prices go on to a second page."""
         if user_input is not None:
+            billing = user_input.get(CONF_BILLING_PERIOD, {})
             self._options = {
+                CONF_BILLING_DAYS: int(billing.get(CONF_BILLING_DAYS, DEFAULT_BILLING_DAYS)),
                 CONF_POLL_TIME: user_input[CONF_POLL_TIME],
                 CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
                 CONF_TARIFF: user_input[CONF_TARIFF],
             }
+            # A cleared start date turns the billing-period sensors off.
+            if billing.get(CONF_BILLING_START):
+                self._options[CONF_BILLING_START] = billing[CONF_BILLING_START]
             if user_input[CONF_TARIFF] == TARIFF_CUSTOM:
                 return await self.async_step_custom_prices()
             return self.async_create_entry(data=self._options)
@@ -459,6 +470,29 @@ class SewOptionsFlow(OptionsFlowWithReload):
                         mode=SelectSelectorMode.LIST,
                         translation_key=CONF_TARIFF,
                     )
+                ),
+                vol.Required(CONF_BILLING_PERIOD): section(
+                    vol.Schema(  # type: ignore[arg-type]
+                        {
+                            vol.Optional(
+                                CONF_BILLING_START,
+                                description={"suggested_value": options.get(CONF_BILLING_START)},
+                            ): DateSelector(),
+                            vol.Required(
+                                CONF_BILLING_DAYS, default=options.get(CONF_BILLING_DAYS, DEFAULT_BILLING_DAYS)
+                            ): NumberSelector(
+                                NumberSelectorConfig(
+                                    min=1,
+                                    max=MAX_BILLING_DAYS,
+                                    step=1,
+                                    unit_of_measurement=UnitOfTime.DAYS,
+                                    mode=NumberSelectorMode.BOX,
+                                )
+                            ),
+                        }
+                    ),
+                    # Open when a period is set, so the user sees it; folded away otherwise.
+                    {"collapsed": CONF_BILLING_START not in options},
                 ),
             }
         )

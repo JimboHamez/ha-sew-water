@@ -117,6 +117,20 @@
           "poll_time": "Local time of day for the daily poll. Only used at the default interval of 1440 minutes. The portal publishes the previous day's readings during the morning; if yesterday is still missing after the poll, move this later.",
           "scan_interval": "Minutes between polls. At the default of 1440 the poll runs once a day at the poll time below; any other value is used as a plain interval.",
           "tariff": "Usage prices for the water cost statistics you can pick on the Energy dashboard's water card. Your bill shows which applies: most homes connected to sewerage pay the water and sewage rate. South East Water's prices are built in for each financial year; choose Custom prices to enter your own."
+        },
+        "sections": {
+          "billing_period": {
+            "name": "Billing period",
+            "description": "Set the first day of any one of your bills to get usage and cost for the bill so far, the litres left at the step 1 price and a projected bill. Leave the date blank to turn these sensors off.",
+            "data": {
+              "billing_start": "Billing period start",
+              "billing_days": "Days in a billing period"
+            },
+            "data_description": {
+              "billing_start": "The first day of a billing period, from the “For period” line under water usage on a bill. Later periods are assumed to follow at the length below; when a new bill shows a different date, update this.",
+              "billing_days": "The number of days your bill gives for the period. Quarterly bills are 90 to 92 days."
+            }
+          }
         }
       },
       "custom_prices": {
@@ -181,6 +195,24 @@
       },
       "recycled_last_reading_date": {
         "name": "Recycled last reading date"
+      },
+      "billing_period_usage": {
+        "name": "Billing period usage"
+      },
+      "billing_period_cost": {
+        "name": "Billing period usage cost"
+      },
+      "step1_remaining": {
+        "name": "Step 1 litres left"
+      },
+      "step1_daily_allowance": {
+        "name": "Step 1 daily allowance"
+      },
+      "projected_usage": {
+        "name": "Projected billing period usage"
+      },
+      "projected_cost": {
+        "name": "Projected billing period usage cost"
       }
     }
   },

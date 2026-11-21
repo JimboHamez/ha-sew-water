@@ -27,11 +27,14 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_conversion import VolumeConverter
 
+from .billing import BillingPeriod, build_period, period_bounds
 from .const import (
     BACKFILL_ATTEMPTS,
     BACKFILL_DAYS,
     BACKFILL_RETRY_MINUTES,
     CONF_BILLING_ACCOUNT_ID,
+    CONF_BILLING_DAYS,
+    CONF_BILLING_START,
     CONF_COOKIES,
     CONF_IMPORT_FROM,
     CONF_METER_ID,
@@ -45,6 +48,7 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_STEP_THRESHOLD,
     CONF_TARIFF,
+    DEFAULT_BILLING_DAYS,
     DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARIFF,
@@ -245,6 +249,7 @@ class SewData:
         last_poll: When the portal was last read successfully.
         window: Every day fetched in the last poll, oldest first.
         recycled: The recycled-water meter's state, when the property has one.
+        billing: The mains meter's current billing period, when a billing period is set in the options.
     """
 
     ids: AccountIds
@@ -253,6 +258,7 @@ class SewData:
     last_poll: datetime
     window: tuple[DailyUsage, ...]
     recycled: MeterData | None = None
+    billing: BillingPeriod | None = None
 
 
 class SewCoordinator(DataUpdateCoordinator[SewData]):
@@ -627,6 +633,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             last_poll=dt_util.utcnow(),
             window=mains.window,
             recycled=recycled,
+            billing=await self._async_billing_period(mains),
         )
 
     def _async_store_cookies(self) -> None:
@@ -867,4 +874,47 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 "known": f"{NEWEST_PRICE_YEAR}-{(NEWEST_PRICE_YEAR + 1) % 100:02d}",
                 "year": f"{year}-{(year + 1) % 100:02d}",
             },
+        )
+
+    # ----------------------------------------------------------- billing period
+
+    @property
+    def billing_anchor(self) -> date | None:
+        """Return the first day of a billing period from the options, or None when no period is set."""
+        if not (raw := self.config_entry.options.get(CONF_BILLING_START)):
+            return None
+        return dt_util.parse_date(str(raw))
+
+    async def _async_billing_period(self, mains: MeterData) -> BillingPeriod | None:
+        """Work out the mains meter's current billing period from its statistic.
+
+        The period is the one containing yesterday. Its usage is the statistic's running total less the
+        total before the period started, so it covers the whole period even when that is longer than the
+        trailing window.
+
+        Args:
+            mains: The mains meter's state after this poll's import.
+
+        Returns:
+            The period's figures, or None when no billing period is set.
+        """
+        if (anchor := self.billing_anchor) is None:
+            return None
+        length = int(self.config_entry.options.get(CONF_BILLING_DAYS, DEFAULT_BILLING_DAYS))
+        start, end = period_bounds(anchor, length, dt_util.now().date() - timedelta(days=1))
+        last_day = next((day.day for day in reversed(mains.window) if day.available), None)
+        if last_day is None:
+            last_day = mains.latest.day if mains.latest else start - timedelta(days=1)
+        usage = 0.0
+        if last_day >= start:
+            # The rows just imported are queued with the recorder; let it commit them before reading back.
+            await get_instance(self.hass).async_block_till_done()
+            usage = mains.total_litres - await self._async_sum_before(statistic_id_for(mains.ids), start)
+        return build_period(
+            start=start,
+            end=end,
+            last_day=last_day,
+            usage=max(usage, 0.0),
+            rates=self.rates_for(max(last_day, start), mains.ids.kind),
+            window=mains.window,
         )

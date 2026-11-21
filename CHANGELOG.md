@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
   2026-27). A new **Prices for water cost** option picks *water and sewage* (the default), *water only*, or
   *custom prices* with your own step 1 and step 2 prices, daily allowance and recycled-water price.
 - A **Repairs** issue appears when a new financial year starts before the integration has its prices.
+- **Billing-period sensors.** Set the start of one of your bills (and the period length, 91 days by default) under
+  the new **Billing period** options to get usage and usage cost for the bill so far, the litres left at the step 1
+  price, a daily allowance to stay within step 1, and projected usage and cost for the whole period. These use South
+  East Water's own rule (440 L × the days in the period), so they can read lower than the cost statistic.
 
 Step 2 is applied to each day's usage above 440 L rather than over the billing period, so the cost can read a
 little higher than the bill when usage is uneven. Fixed service charges and concessions are not included. After

@@ -217,6 +217,13 @@ Setup finishes straight away with the last 90 days; the rest is imported in the 
 | Step 1 allowance per day | 440 L | Litres a day charged at the step 1 price. |
 | Recycled water price | today's published price | Only used with a recycled-water meter. Leave blank to keep South East Water's published price. |
 
+**Billing period** (a folded section; optional):
+
+| Field | Default | Description |
+|---|---|---|
+| Billing period start | blank | The first day of any one of your bills, from the *For period* line under water usage. Setting it adds the [billing-period sensors](#entities); clearing it turns them off. |
+| Days in a billing period | 91 | The number of days your bill gives for the period. Quarterly bills are 90 to 92 days. Later periods are assumed to follow at this length, so when a new bill shows a different start date, update the date above. |
+
 Saving the options reloads the integration, which re-costs the last 30 days straight away. To re-cost older days with new prices, run `sew_water.import_from_date`.
 
 ### Re-authentication
@@ -280,6 +287,19 @@ All entities sit on one device, **South East Water**.
 | `sensor.south_east_water_recycled_last_reading_date` | date | Only with a recycled-water meter. The same as *Last reading date*, for the recycled meter; **disabled by default**. |
 
 The *Daily usage*, *Total usage* and *Last reading date* sensors are always the mains (potable) meter.
+
+**Billing-period sensors** are added for the mains meter when a [billing period](#options) is set. They cover the period containing yesterday and use South East Water's own step rule: step 1 for the first 440 L × the days in the period, however they were spread. So the usage cost here can be lower than the [cost statistic](#water-cost) for the same days, which applies the 440 L to each day.
+
+| Sensor | Unit | Description |
+|---|---|---|
+| `sensor.south_east_water_billing_period_usage` | L | Usage from the start of the period to the newest reading. Attributes: `period_start`, `period_end` (the first day of the next period), `days_in_period`, `days_with_data`, `step1_allowance`. |
+| `sensor.south_east_water_billing_period_usage_cost` | currency | Usage charge for that usage. |
+| `sensor.south_east_water_step_1_litres_left` | L | Litres left at the step 1 price this period. |
+| `sensor.south_east_water_step_1_daily_allowance` | L | Litres a day you can use for the rest of the period and stay within step 1. |
+| `sensor.south_east_water_projected_billing_period_usage` | L | Usage by the end of the period, if the rest of it goes at the average of the last 14 days. |
+| `sensor.south_east_water_projected_billing_period_usage_cost` | currency | Usage charge for the projected usage. |
+
+The step 1 sensors are *Unknown* with a single flat custom price. Service charges and concessions are not included, and a period that spans 1 July is costed at the newer year's prices.
 
 | Button | Description |
 |---|---|
@@ -435,7 +455,6 @@ Debug output never includes your email, password, cookies or one-time codes. Acc
 
 ## Roadmap
 
-- **Billing-period cost** — enter the start of your billing period to get usage and cost for the bill so far, the litres left at the step 1 price, a daily allowance to stay under step 2, and a projected bill ([#9](https://github.com/JimboHamez/ha-sew-water/discussions/9)).
 - **Yarra Valley Water** — runs on the same Salesforce Experience Cloud backend and the client could be adapted, but it is untested and not included.
 
 Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items).

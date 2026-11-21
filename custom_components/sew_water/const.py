@@ -13,6 +13,11 @@ ENTRY_TITLE: Final = "South East Water"
 
 # Config-entry data keys (username/password use homeassistant.const).
 CONF_BILLING_ACCOUNT_ID: Final = "billing_account_id"
+# Billing period (options): days in each period, and the first day of any one period (ISO date). The options
+# form groups them in the CONF_BILLING_PERIOD section; they are stored flat.
+CONF_BILLING_DAYS: Final = "billing_days"
+CONF_BILLING_PERIOD: Final = "billing_period"
+CONF_BILLING_START: Final = "billing_start"
 CONF_COOKIES: Final = "cookies"
 CONF_IMPORT_FROM: Final = "import_from"
 # The mains meter, which every version has polled; kept so older entries and downgrades keep working.
@@ -43,6 +48,9 @@ TARIFF_RECYCLED: Final = "recycled"
 TARIFF_WATER_ONLY: Final = "water_only"
 TARIFF_WATER_SEWAGE: Final = "water_sewage"
 DEFAULT_TARIFF: Final = TARIFF_WATER_SEWAGE
+# South East Water bills residential accounts quarterly; a period is 90 to 92 days.
+DEFAULT_BILLING_DAYS: Final = 91
+MAX_BILLING_DAYS: Final = 366
 
 # Days of history imported the first time the integration runs.
 BACKFILL_DAYS: Final = 90
