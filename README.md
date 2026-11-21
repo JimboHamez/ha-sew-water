@@ -18,6 +18,7 @@ Daily mains water usage from the [South East Water](https://my.southeastwater.co
 It gives you:
 
 - **Energy dashboard water** — one long-term statistic, `sew_water:water_usage_mains`, with a row for every **hour**, so the dashboard's hourly, daily, weekly and monthly views are all real. A property with a recycled-water meter gets a second one, `sew_water:water_usage_recycled`.
+- **Water cost** — a matching cost statistic, `sew_water:water_cost_mains` (and `sew_water:water_cost_recycled`), worked out every hour from South East Water's published usage prices or your own, for the Energy dashboard's water card.
 - **Sensors** — yesterday's litres (with the 24 hourly readings as attributes), a running total and the reading date.
 - **One login** — sign in once with your portal email, password and a one-time code; the session is kept and re-used, and survives restarts.
 - **Late data handled** — the portal publishes readings a day or two late and sometimes corrects them, so every poll re-imports the last 30 days.
@@ -138,7 +139,7 @@ Repositories added from a link are checked for updates every 48 hours, so a new 
 2. Remove the files. Marketplace: **Settings → Marketplace** → **South East Water** → remove it. HACS: HACS → **South East Water** → ⋮ → **Remove**. Manual install: delete `config/custom_components/sew_water/`.
 3. Restart Home Assistant.
 
-One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** (and `sew_water:water_usage_recycled`, if you have a recycled meter) and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
+One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** (and `sew_water:water_usage_recycled`, if you have a recycled meter, plus the matching `sew_water:water_cost_…` statistics) and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
 
 The integration uses only `aiohttp`, which ships with Home Assistant — nothing else to install.
 
@@ -205,6 +206,18 @@ Setup finishes straight away with the last 90 days; the rest is imported in the 
 |---|---|---|
 | Poll interval | 1440 min | Minutes between polls. At the default the poll is pinned to the **poll time** below every day; any other value (minimum 60) is used as a plain interval. |
 | Poll time | 02:00 | Local time of the daily poll. Only used at the default interval. The portal publishes the previous day's readings during the morning; if *Daily usage* is still a day behind after the poll, move this later (10:00 has been reported to work). |
+| Prices for water cost | South East Water: water and sewage | The usage prices behind the [cost statistics](#water-cost). *Water and sewage* suits most homes connected to sewerage; your bill says which you pay. *Water only* is the other published tariff. *Custom prices* opens a second page. |
+
+**Custom prices** (only when chosen above), in dollars per kilolitre as printed on your bill:
+
+| Field | Default | Description |
+|---|---|---|
+| Step 1 price | today's published price | Price for usage up to the daily allowance, or for all usage if there is no step 2 price. |
+| Step 2 price | today's published price | Price for usage above the daily allowance. Leave blank for one flat price. |
+| Step 1 allowance per day | 440 L | Litres a day charged at the step 1 price. |
+| Recycled water price | today's published price | Only used with a recycled-water meter. Leave blank to keep South East Water's published price. |
+
+Saving the options reloads the integration, which re-costs the last 30 days straight away. To re-cost older days with new prices, run `sew_water.import_from_date`.
 
 ### Re-authentication
 
@@ -240,6 +253,16 @@ The protocol, the statistics rules and every design decision are in [DESIGN_DOCU
 *Settings → Dashboards → Energy → Water consumption → Add water source* and pick **`sew_water:water_usage_mains`**. If you have a recycled-water meter, add **`sew_water:water_usage_recycled`** as a second water source.
 
 > ⚠️ Use the statistic, not the `Total usage` sensor. The statistic has one row per hour with the correct timestamp, including back-filled and corrected days. The sensor only changes once per poll, so the dashboard would attribute a whole day's usage to the minute the poll ran.
+
+### Water cost
+
+In the same water source dialog, choose **Use an entity tracking the total costs** and pick **`sew_water:water_cost_mains`** (or **`sew_water:water_cost_recycled`** for the recycled source). Home Assistant doesn't accept a static or entity price for a water source that comes from a statistic, so this is the way to get cost on the water card.
+
+How each hour is costed:
+
+- **Usage charges only.** Fixed quarterly service charges (water, sewerage, Parks, Waterways and Drainage) and concessions are not included.
+- **Prices by financial year.** South East Water's published residential prices are built in for each financial year from 2025-26, and every day uses the prices of its own year. Days before 1 July 2025 use the 2025-26 prices. When a new financial year starts before this integration has its prices, a **Repairs** issue says so and the newest known prices are used until you update (or switch to custom prices).
+- **Step 2 per day.** South East Water charges step 2 on usage above 440 L a day *averaged over the billing period*. The integration doesn't know your billing period, so it applies the 440 L to each day instead. Over a bill this matches exactly when every day is on the same side of 440 L, and otherwise reads a little high, never low: a day of heavy garden watering counts as step 2 even if quiet days elsewhere in the bill would have averaged it out.
 
 ---
 
@@ -375,7 +398,7 @@ actions:
 - **Upgrading from 2.2 or earlier with a recycled meter.** Earlier versions read whichever digital meter the portal listed first, which on some properties was the recycled one, so `sew_water:water_usage_mains` held recycled water. On the first start after the update the integration lists the meters, switches to the mains meter and, if the old one was recycled, clears `sew_water:water_usage_mains` and imports it again (from the installation date given at setup, or the last 90 days). The recycled meter's history goes into `sew_water:water_usage_recycled`.
 - **Backfill on first setup is 90 days** unless you give an installation date in the wizard. `sew_water.import_from_date` covers anything else.
 - **Sensor totals versus statistics.** The *Total usage* sensor changes once per poll, so its history attributes the whole day to the minute the poll ran. Use the statistic for the Energy dashboard.
-- **No water cost yet.** Home Assistant doesn't accept a $/L price for a water source that comes from a long-term statistic, which is how this integration feeds the Energy dashboard, so the water card can't show cost. Adding a cost statistic built from South East Water's published prices is being discussed in [#9](https://github.com/JimboHamez/ha-sew-water/discussions/9).
+- **Water cost is an estimate of usage charges.** Step 2 is worked out per day rather than over the billing period, so it can read a little higher than the bill on uneven usage, and service charges and concessions are left out. See [Water cost](#water-cost).
 - **The portal is not an API.** The integration speaks the portal's own web protocol; a change on South East Water's side can stop it working until the integration is updated. The client is isolated in one module to keep such fixes small.
 
 ---
@@ -412,6 +435,7 @@ Debug output never includes your email, password, cookies or one-time codes. Acc
 
 ## Roadmap
 
+- **Billing-period cost** — enter the start of your billing period to get usage and cost for the bill so far, the litres left at the step 1 price, a daily allowance to stay under step 2, and a projected bill ([#9](https://github.com/JimboHamez/ha-sew-water/discussions/9)).
 - **Yarra Valley Water** — runs on the same Salesforce Experience Cloud backend and the client could be adapted, but it is untested and not included.
 
 Full list in [DESIGN_DOCUMENT.md → Open items](DESIGN_DOCUMENT.md#9-open-items).

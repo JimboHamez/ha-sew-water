@@ -26,8 +26,10 @@ from custom_components.sew_water.const import (
     CONF_POLL_TIME,
     CONF_PROPERTY,
     CONF_SCAN_INTERVAL,
+    CONF_TARIFF,
     DOMAIN,
     ENTRY_TITLE,
+    TARIFF_WATER_SEWAGE,
 )
 from custom_components.sew_water.sew_client import (
     AccountIds,
@@ -556,7 +558,11 @@ async def test_options_flow_sets_scan_interval_and_poll_time(
     )
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert setup_integration.options == {CONF_POLL_TIME: "10:30:00", CONF_SCAN_INTERVAL: 360}
+    assert setup_integration.options == {
+        CONF_POLL_TIME: "10:30:00",
+        CONF_SCAN_INTERVAL: 360,
+        CONF_TARIFF: TARIFF_WATER_SEWAGE,
+    }
     assert setup_integration.state is config_entries.ConfigEntryState.LOADED
 
 

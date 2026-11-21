@@ -3,6 +3,22 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+- **Water cost for the Energy dashboard** ([#9](https://github.com/JimboHamez/ha-sew-water/discussions/9)). New
+  statistics `sew_water:water_cost_mains` and, with a recycled-water meter, `sew_water:water_cost_recycled` hold the
+  cost of every hour's usage. In the water source dialog choose *Use an entity tracking the total costs* and pick
+  the cost statistic.
+- South East Water's published residential usage prices are built in for each financial year (2025-26 and
+  2026-27). A new **Prices for water cost** option picks *water and sewage* (the default), *water only*, or
+  *custom prices* with your own step 1 and step 2 prices, daily allowance and recycled-water price.
+- A **Repairs** issue appears when a new financial year starts before the integration has its prices.
+
+Step 2 is applied to each day's usage above 440 L rather than over the billing period, so the cost can read a
+little higher than the bill when usage is uneven. Fixed service charges and concessions are not included. After
+updating, the cost history is imported once from the installation date given at setup, or for the last 90 days.
+
 ## [2.3.1] — 2026-11-12
 
 Same code as the 2.3.1b1 beta, confirmed by the reporter of #16. Nothing changes for a login with one

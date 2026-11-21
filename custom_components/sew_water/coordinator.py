@@ -39,17 +39,29 @@ from .const import (
     CONF_METER_SERIAL,
     CONF_METERS,
     CONF_POLL_TIME,
+    CONF_PRICE_RECYCLED,
+    CONF_PRICE_STEP1,
+    CONF_PRICE_STEP2,
     CONF_SCAN_INTERVAL,
+    CONF_STEP_THRESHOLD,
+    CONF_TARIFF,
     DEFAULT_POLL_TIME,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TARIFF,
     DOMAIN,
     ISSUE_BACKFILL_FAILED,
+    ISSUE_PRICES_OUT_OF_DATE,
     KEEPALIVE_MINUTES,
     POLL_JITTER_MINUTES,
+    STATISTIC_ID_COST_MAINS,
+    STATISTIC_ID_COST_RECYCLED,
     STATISTIC_ID_MAINS,
     STATISTIC_ID_RECYCLED,
+    TARIFF_CUSTOM,
+    TARIFF_RECYCLED,
     TRAILING_WINDOW_DAYS,
 )
+from .pricing import NEWEST_PRICE_YEAR, STEP_THRESHOLD_LITRES, Rates, financial_year, hourly_costs, published_rates
 from .sew_client import (
     METER_KIND_MAINS,
     METER_KIND_RECYCLED,
@@ -80,7 +92,14 @@ STATISTIC_IDS: Mapping[MeterKind, str] = {
     METER_KIND_MAINS: STATISTIC_ID_MAINS,
     METER_KIND_RECYCLED: STATISTIC_ID_RECYCLED,
 }
+# The external statistic holding the cost of each kind of meter's usage, for the Energy dashboard's water card.
+COST_STATISTIC_IDS: Mapping[MeterKind, str] = {
+    METER_KIND_MAINS: STATISTIC_ID_COST_MAINS,
+    METER_KIND_RECYCLED: STATISTIC_ID_COST_RECYCLED,
+}
 STATISTIC_NAMES: Mapping[str, str] = {
+    STATISTIC_ID_COST_MAINS: "South East Water mains cost",
+    STATISTIC_ID_COST_RECYCLED: "South East Water recycled cost",
     STATISTIC_ID_MAINS: "South East Water mains usage",
     STATISTIC_ID_RECYCLED: "South East Water recycled usage",
 }
@@ -96,6 +115,18 @@ def statistic_id_for(meter: AccountIds) -> str:
         ``sew_water:water_usage_mains`` or ``sew_water:water_usage_recycled``.
     """
     return STATISTIC_IDS[meter.kind]
+
+
+def cost_statistic_id_for(meter: AccountIds) -> str:
+    """Return the external statistic a meter's usage cost is imported into.
+
+    Args:
+        meter: The meter, with its kind.
+
+    Returns:
+        ``sew_water:water_cost_mains`` or ``sew_water:water_cost_recycled``.
+    """
+    return COST_STATISTIC_IDS[meter.kind]
 
 
 def meters_to_data(meters: Sequence[AccountIds]) -> list[dict[str, str | None]]:
@@ -381,9 +412,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         await get_instance(self.hass).async_block_till_done()
         # Checked per meter: a meter added later, or a statistic cleared by the upgrade, needs its history
         # even when the other meter's is complete.
-        missing = [
-            meter for meter in self.meters if not await self._async_has_statistics_on(statistic_id_for(meter), start)
-        ]
+        missing = [meter for meter in self.meters if not await self._async_has_both_statistics(meter, start)]
         if not missing:
             _LOGGER.debug("History back to %s is already imported", start)
             ir.async_delete_issue(self.hass, DOMAIN, issue_id)
@@ -441,7 +470,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             # backfill window while the other keeps the short trailing one.
             starts: dict[AccountIds, date] = {}
             for meter in self.meters:
-                first_run = await self._async_last_statistic_day(statistic_id_for(meter)) is None
+                first_run = not await self._async_has_both_statistics(meter)
                 window_days = BACKFILL_DAYS if first_run else TRAILING_WINDOW_DAYS
                 starts[meter] = yesterday - timedelta(days=window_days - 1)
             data = await self._async_import(starts, yesterday)
@@ -577,6 +606,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         self._async_store_cookies()
         for meter, usage in fetched:
             total = await self._async_import_statistics(statistic_id_for(meter), usage)
+            await self._async_import_cost(meter, usage)
             latest = next((day for day in reversed(usage) if day.available and day.litres > 0), None)
             self._meter_data[meter] = MeterData(ids=meter, latest=latest, total_litres=total, window=tuple(usage))
             _LOGGER.debug(
@@ -587,6 +617,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 end,
                 latest.day if latest else None,
             )
+        self._async_check_prices(end)
         mains = self._meter_data[self.ids]
         recycled = None if self.recycled_meter is None else self._meter_data.get(self.recycled_meter)
         return SewData(
@@ -611,6 +642,17 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
     @staticmethod
     def _metadata(statistic_id: str) -> StatisticMetaData:
         """Describe a water external statistic used by the Energy dashboard."""
+        if statistic_id in COST_STATISTIC_IDS.values():
+            # A cost has no unit converter; the Energy dashboard shows it in the configured currency.
+            return StatisticMetaData(
+                has_sum=True,
+                mean_type=StatisticMeanType.NONE,
+                name=STATISTIC_NAMES[statistic_id],
+                source=DOMAIN,
+                statistic_id=statistic_id,
+                unit_class=None,
+                unit_of_measurement=None,
+            )
         return StatisticMetaData(
             has_sum=True,
             mean_type=StatisticMeanType.NONE,
@@ -639,26 +681,56 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         """
         return dt_util.as_utc(dt_util.start_of_local_day(day)) + timedelta(hours=hour)
 
+    @staticmethod
+    def _hourly_litres(day: DailyUsage) -> list[float]:
+        """Return a day's usage per hourly reading, or its total alone when it has no hourly readings."""
+        return [float(litres) for litres in day.readings] if day.readings else [float(day.litres)]
+
     @classmethod
-    def _hourly_rows(cls, day: DailyUsage) -> list[tuple[datetime, float]]:
-        """Split a day into ``(row start, litres)`` pairs, one per hourly reading.
+    def _hourly_rows(cls, day: DailyUsage, values: Sequence[float] | None = None) -> list[tuple[datetime, float]]:
+        """Split a day into ``(row start, value)`` pairs, one per hourly reading.
 
         A day without hourly readings becomes a single midnight row carrying the day's total. On the
         23-hour day when daylight saving starts, the reading that would land on the next day's midnight
         is folded into the day's last row so the two days never share a row.
+
+        Args:
+            day: The day to split.
+            values: One value per entry of ``_hourly_litres(day)``, such as each hour's cost; the
+                litres themselves when omitted.
         """
+        hourly = cls._hourly_litres(day) if values is None else values
         if not day.readings:
-            return [(cls._row_start(day.day), float(day.litres))]
+            return [(cls._row_start(day.day), float(sum(hourly)))]
         next_midnight = cls._row_start(day.day + timedelta(days=1))
         rows: list[tuple[datetime, float]] = []
-        for hour, litres in enumerate(day.readings):
+        for hour, value in enumerate(hourly):
             start = cls._row_start(day.day, hour)
             if start >= next_midnight and rows:
-                last_start, last_litres = rows[-1]
-                rows[-1] = (last_start, last_litres + litres)
+                last_start, last_value = rows[-1]
+                rows[-1] = (last_start, last_value + value)
                 continue
-            rows.append((start, float(litres)))
+            rows.append((start, float(value)))
         return rows
+
+    async def _async_has_both_statistics(self, meter: AccountIds, day: date | None = None) -> bool:
+        """Return whether a meter's usage and cost statistics both hold rows.
+
+        A cost statistic is missing on an installation upgraded from a version without costs, so its
+        history has to be imported again even though the usage is already there.
+
+        Args:
+            meter: The meter to check.
+            day: A local day both statistics must have rows on; any row at all when omitted.
+        """
+        for statistic_id in (statistic_id_for(meter), cost_statistic_id_for(meter)):
+            if day is None:
+                present = await self._async_last_statistic_day(statistic_id) is not None
+            else:
+                present = await self._async_has_statistics_on(statistic_id, day)
+            if not present:
+                return False
+        return True
 
     async def _async_has_statistics_on(self, statistic_id: str, day: date) -> bool:
         """Return whether any statistic row exists for the local day ``day``."""
@@ -715,3 +787,84 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
                 statistics.append(StatisticData(start=start, state=litres, sum=running))
         async_add_external_statistics(self.hass, self._metadata(statistic_id), statistics)
         return running
+
+    # -------------------------------------------------------------------- costs
+
+    def rates_for(self, day: date, kind: MeterKind) -> Rates:
+        """Return the usage prices that apply to a meter's usage on ``day``.
+
+        Args:
+            day: A local calendar day.
+            kind: The meter's kind.
+
+        Returns:
+            The custom prices from the options when the tariff is ``TARIFF_CUSTOM`` (falling back to the
+            published recycled price when no custom one is set), otherwise the published prices for the
+            day's financial year.
+        """
+        options = self.config_entry.options
+        tariff = str(options.get(CONF_TARIFF, DEFAULT_TARIFF))
+        if kind == METER_KIND_RECYCLED:
+            if tariff == TARIFF_CUSTOM and (price := options.get(CONF_PRICE_RECYCLED)) is not None:
+                return Rates(step1=float(price))
+            return published_rates(day, TARIFF_RECYCLED)
+        if tariff != TARIFF_CUSTOM:
+            return published_rates(day, tariff)
+        step2 = options.get(CONF_PRICE_STEP2)
+        return Rates(
+            step1=float(options[CONF_PRICE_STEP1]),
+            step2=None if step2 is None else float(step2),
+            threshold=float(options.get(CONF_STEP_THRESHOLD, STEP_THRESHOLD_LITRES)),
+        )
+
+    @property
+    def uses_published_prices(self) -> bool:
+        """Return whether any cost statistic is priced from the built-in table rather than custom prices."""
+        options = self.config_entry.options
+        if options.get(CONF_TARIFF, DEFAULT_TARIFF) != TARIFF_CUSTOM:
+            return True
+        return self.recycled_meter is not None and options.get(CONF_PRICE_RECYCLED) is None
+
+    async def _async_import_cost(self, meter: AccountIds, usage: list[DailyUsage]) -> None:
+        """Write one cost row per usage row, keyed and summed the same way as the usage statistic.
+
+        Args:
+            meter: The meter the usage belongs to.
+            usage: The days just imported into the meter's usage statistic, oldest first.
+        """
+        if not usage:
+            return
+        statistic_id = cost_statistic_id_for(meter)
+        running = await self._async_sum_before(statistic_id, usage[0].day)
+        statistics: list[StatisticData] = []
+        for day in usage:
+            costs = hourly_costs(self._hourly_litres(day), self.rates_for(day.day, meter.kind))
+            for start, cost in self._hourly_rows(day, costs):
+                running += cost
+                statistics.append(StatisticData(start=start, state=cost, sum=running))
+        async_add_external_statistics(self.hass, self._metadata(statistic_id), statistics)
+
+    @callback
+    def _async_check_prices(self, last_day: date) -> None:
+        """Raise a repair issue while days are costed at a previous financial year's published prices.
+
+        Args:
+            last_day: The newest day just imported.
+        """
+        issue_id = f"{ISSUE_PRICES_OUT_OF_DATE}_{self.config_entry.entry_id}"
+        year = financial_year(last_day)
+        if year <= NEWEST_PRICE_YEAR or not self.uses_published_prices:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_PRICES_OUT_OF_DATE,
+            translation_placeholders={
+                "known": f"{NEWEST_PRICE_YEAR}-{(NEWEST_PRICE_YEAR + 1) % 100:02d}",
+                "year": f"{year}-{(year + 1) % 100:02d}",
+            },
+        )

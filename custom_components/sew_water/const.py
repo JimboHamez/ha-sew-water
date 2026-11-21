@@ -25,9 +25,24 @@ CONF_METERS: Final = "meters"
 CONF_MFA_CHANNEL: Final = "mfa_channel"
 CONF_MFA_CODE: Final = "mfa_code"
 CONF_POLL_TIME: Final = "poll_time"
+# Custom usage prices (options), used when the tariff option is TARIFF_CUSTOM.
+CONF_PRICE_RECYCLED: Final = "price_recycled"
+CONF_PRICE_STEP1: Final = "price_step1"
+CONF_PRICE_STEP2: Final = "price_step2"
 # The setup flow's property picker; its value is an index into the flow's property list, never stored.
 CONF_PROPERTY: Final = "property"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
+CONF_STEP_THRESHOLD: Final = "step_threshold"
+# Which usage prices the cost statistics use (option).
+CONF_TARIFF: Final = "tariff"
+
+# Tariffs. The first three are South East Water's published prices (see pricing.py); recycled is used only
+# for the recycled-water meter and is not offered as a choice.
+TARIFF_CUSTOM: Final = "custom"
+TARIFF_RECYCLED: Final = "recycled"
+TARIFF_WATER_ONLY: Final = "water_only"
+TARIFF_WATER_SEWAGE: Final = "water_sewage"
+DEFAULT_TARIFF: Final = TARIFF_WATER_SEWAGE
 
 # Days of history imported the first time the integration runs.
 BACKFILL_DAYS: Final = 90
@@ -52,6 +67,7 @@ POLL_JITTER_MINUTES: Final = 10
 KEEPALIVE_MINUTES: Final = 30
 
 ISSUE_BACKFILL_FAILED: Final = "backfill_failed"
+ISSUE_PRICES_OUT_OF_DATE: Final = "prices_out_of_date"
 
 SERVICE_FORCE_IMPORT: Final = "force_import"
 SERVICE_IMPORT_FROM_DATE: Final = "import_from_date"
@@ -59,3 +75,5 @@ SERVICE_ATTR_START_DATE: Final = "start_date"
 
 STATISTIC_ID_MAINS: Final = f"{DOMAIN}:water_usage_mains"
 STATISTIC_ID_RECYCLED: Final = f"{DOMAIN}:water_usage_recycled"
+STATISTIC_ID_COST_MAINS: Final = f"{DOMAIN}:water_cost_mains"
+STATISTIC_ID_COST_RECYCLED: Final = f"{DOMAIN}:water_cost_recycled"
