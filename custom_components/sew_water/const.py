@@ -13,13 +13,12 @@ ENTRY_TITLE: Final = "South East Water"
 
 # Config-entry data keys (username/password use homeassistant.const).
 CONF_BILLING_ACCOUNT_ID: Final = "billing_account_id"
-# Billing period (options): days in each period, and the first day of any one period (ISO date). The options
-# form groups them in the CONF_BILLING_PERIOD section; they are stored flat.
-CONF_BILLING_DAYS: Final = "billing_days"
+# Billing period (options section; its fields are stored flat).
 CONF_BILLING_PERIOD: Final = "billing_period"
-CONF_BILLING_START: Final = "billing_start"
 CONF_COOKIES: Final = "cookies"
 CONF_IMPORT_FROM: Final = "import_from"
+# The date of a meter read (ISO date) and the days between reads, from the portal; they set the billing period.
+CONF_LAST_READ_DATE: Final = "last_read_date"
 # The mains meter, which every version has polled; kept so older entries and downgrades keep working.
 CONF_METER_ID: Final = "meter_id"
 CONF_METER_KIND: Final = "meter_kind"
@@ -36,6 +35,7 @@ CONF_PRICE_STEP1: Final = "price_step1"
 CONF_PRICE_STEP2: Final = "price_step2"
 # The setup flow's property picker; its value is an index into the flow's property list, never stored.
 CONF_PROPERTY: Final = "property"
+CONF_READ_DAYS: Final = "read_days"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
 CONF_STEP_THRESHOLD: Final = "step_threshold"
 # Which usage prices the cost statistics use (option).
@@ -48,9 +48,10 @@ TARIFF_RECYCLED: Final = "recycled"
 TARIFF_WATER_ONLY: Final = "water_only"
 TARIFF_WATER_SEWAGE: Final = "water_sewage"
 DEFAULT_TARIFF: Final = TARIFF_WATER_SEWAGE
-# South East Water bills residential accounts quarterly; a period is 90 to 92 days.
-DEFAULT_BILLING_DAYS: Final = 91
-MAX_BILLING_DAYS: Final = 366
+# South East Water reads residential meters quarterly, 90 to 92 days apart.
+DEFAULT_READ_DAYS: Final = 91
+MAX_READ_DAYS: Final = 366
+MIN_READ_DAYS: Final = 2
 
 # Days of history imported the first time the integration runs.
 BACKFILL_DAYS: Final = 90

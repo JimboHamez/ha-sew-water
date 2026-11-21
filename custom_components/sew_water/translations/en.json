@@ -121,14 +121,14 @@
         "sections": {
           "billing_period": {
             "name": "Billing period",
-            "description": "Set the first day of any one of your bills to get usage and cost for the bill so far, the litres left at the step 1 price and a projected bill. Leave the date blank to turn these sensors off.",
+            "description": "Enter your last meter read date to get usage and cost for the bill so far, the litres left at the step 1 price and a projected bill. Leave the date blank to turn these sensors off.",
             "data": {
-              "billing_start": "Billing period start",
-              "billing_days": "Days in a billing period"
+              "last_read_date": "Last meter read date",
+              "read_days": "Days between meter reads"
             },
             "data_description": {
-              "billing_start": "The first day of a billing period, from the “For period” line under water usage on a bill. Later periods are assumed to follow at the length below; when a new bill shows a different date, update this.",
-              "billing_days": "The number of days your bill gives for the period. Quarterly bills are 90 to 92 days."
+              "last_read_date": "The “Meter read date” shown in the portal, or the last day of the “For period” line on your latest bill. The current bill starts the day after it.",
+              "read_days": "Days from one meter read to the next. The portal shows the next read date; quarterly reads are 90 to 92 days apart. The bill counts one day fewer, and the step 1 allowance uses the bill's count."
             }
           }
         }

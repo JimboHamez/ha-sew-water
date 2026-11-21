@@ -41,11 +41,10 @@ import voluptuous as vol
 
 from .const import (
     CONF_BILLING_ACCOUNT_ID,
-    CONF_BILLING_DAYS,
     CONF_BILLING_PERIOD,
-    CONF_BILLING_START,
     CONF_COOKIES,
     CONF_IMPORT_FROM,
+    CONF_LAST_READ_DATE,
     CONF_METER_ID,
     CONF_METER_SERIAL,
     CONF_METERS,
@@ -56,16 +55,18 @@ from .const import (
     CONF_PRICE_STEP1,
     CONF_PRICE_STEP2,
     CONF_PROPERTY,
+    CONF_READ_DAYS,
     CONF_SCAN_INTERVAL,
     CONF_STEP_THRESHOLD,
     CONF_TARIFF,
-    DEFAULT_BILLING_DAYS,
     DEFAULT_POLL_TIME,
+    DEFAULT_READ_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARIFF,
     DOMAIN,
     ENTRY_TITLE,
-    MAX_BILLING_DAYS,
+    MAX_READ_DAYS,
+    MIN_READ_DAYS,
     MIN_SCAN_INTERVAL,
     TARIFF_CUSTOM,
     TARIFF_RECYCLED,
@@ -439,14 +440,14 @@ class SewOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             billing = user_input.get(CONF_BILLING_PERIOD, {})
             self._options = {
-                CONF_BILLING_DAYS: int(billing.get(CONF_BILLING_DAYS, DEFAULT_BILLING_DAYS)),
+                CONF_READ_DAYS: int(billing.get(CONF_READ_DAYS, DEFAULT_READ_DAYS)),
                 CONF_POLL_TIME: user_input[CONF_POLL_TIME],
                 CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
                 CONF_TARIFF: user_input[CONF_TARIFF],
             }
-            # A cleared start date turns the billing-period sensors off.
-            if billing.get(CONF_BILLING_START):
-                self._options[CONF_BILLING_START] = billing[CONF_BILLING_START]
+            # A cleared read date turns the billing-period sensors off.
+            if billing.get(CONF_LAST_READ_DATE):
+                self._options[CONF_LAST_READ_DATE] = billing[CONF_LAST_READ_DATE]
             if user_input[CONF_TARIFF] == TARIFF_CUSTOM:
                 return await self.async_step_custom_prices()
             return self.async_create_entry(data=self._options)
@@ -475,15 +476,15 @@ class SewOptionsFlow(OptionsFlowWithReload):
                     vol.Schema(  # type: ignore[arg-type]
                         {
                             vol.Optional(
-                                CONF_BILLING_START,
-                                description={"suggested_value": options.get(CONF_BILLING_START)},
+                                CONF_LAST_READ_DATE,
+                                description={"suggested_value": options.get(CONF_LAST_READ_DATE)},
                             ): DateSelector(),
                             vol.Required(
-                                CONF_BILLING_DAYS, default=options.get(CONF_BILLING_DAYS, DEFAULT_BILLING_DAYS)
+                                CONF_READ_DAYS, default=options.get(CONF_READ_DAYS, DEFAULT_READ_DAYS)
                             ): NumberSelector(
                                 NumberSelectorConfig(
-                                    min=1,
-                                    max=MAX_BILLING_DAYS,
+                                    min=MIN_READ_DAYS,
+                                    max=MAX_READ_DAYS,
                                     step=1,
                                     unit_of_measurement=UnitOfTime.DAYS,
                                     mode=NumberSelectorMode.BOX,
@@ -492,7 +493,7 @@ class SewOptionsFlow(OptionsFlowWithReload):
                         }
                     ),
                     # Open when a period is set, so the user sees it; folded away otherwise.
-                    {"collapsed": CONF_BILLING_START not in options},
+                    {"collapsed": CONF_LAST_READ_DATE not in options},
                 ),
             }
         )

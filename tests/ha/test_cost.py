@@ -18,17 +18,17 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sew_water import coordinator as coordinator_module
 from custom_components.sew_water.const import (
-    CONF_BILLING_DAYS,
     CONF_BILLING_PERIOD,
     CONF_POLL_TIME,
     CONF_PRICE_RECYCLED,
     CONF_PRICE_STEP1,
     CONF_PRICE_STEP2,
+    CONF_READ_DAYS,
     CONF_SCAN_INTERVAL,
     CONF_STEP_THRESHOLD,
     CONF_TARIFF,
-    DEFAULT_BILLING_DAYS,
     DEFAULT_POLL_TIME,
+    DEFAULT_READ_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     ISSUE_PRICES_OUT_OF_DATE,
@@ -191,7 +191,7 @@ async def test_options_flow_custom_prices(hass: HomeAssistant, setup_integration
             CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
             CONF_POLL_TIME: DEFAULT_POLL_TIME,
             CONF_TARIFF: TARIFF_CUSTOM,
-            CONF_BILLING_PERIOD: {CONF_BILLING_DAYS: DEFAULT_BILLING_DAYS},
+            CONF_BILLING_PERIOD: {CONF_READ_DAYS: DEFAULT_READ_DAYS},
         },
     )
     assert result["type"] is FlowResultType.FORM
@@ -210,7 +210,7 @@ async def test_options_flow_custom_prices(hass: HomeAssistant, setup_integration
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert setup_integration.options == {
-        CONF_BILLING_DAYS: DEFAULT_BILLING_DAYS,
+        CONF_READ_DAYS: DEFAULT_READ_DAYS,
         CONF_POLL_TIME: DEFAULT_POLL_TIME,
         CONF_PRICE_STEP1: 3.5,
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
@@ -226,7 +226,7 @@ async def test_options_flow_custom_prices(hass: HomeAssistant, setup_integration
             CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
             CONF_POLL_TIME: DEFAULT_POLL_TIME,
             CONF_TARIFF: TARIFF_CUSTOM,
-            CONF_BILLING_PERIOD: {CONF_BILLING_DAYS: DEFAULT_BILLING_DAYS},
+            CONF_BILLING_PERIOD: {CONF_READ_DAYS: DEFAULT_READ_DAYS},
         },
     )
     suggested = {str(key): key.description.get("suggested_value") for key in result["data_schema"].schema}

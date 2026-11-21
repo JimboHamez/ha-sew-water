@@ -28,15 +28,29 @@ def day_of(day: date, litres: int, available: bool = True) -> DailyUsage:
 @pytest.mark.parametrize(
     ("day", "start", "end"),
     [
-        (date(2026, 7, 22), date(2026, 7, 22), date(2026, 10, 21)),
-        (date(2026, 10, 20), date(2026, 7, 22), date(2026, 10, 21)),
-        (date(2026, 10, 21), date(2026, 10, 21), date(2027, 1, 20)),
-        (date(2026, 7, 21), date(2026, 4, 22), date(2026, 7, 22)),
+        (date(2026, 10, 15), date(2026, 10, 15), date(2027, 1, 13)),
+        (date(2027, 1, 13), date(2026, 10, 15), date(2027, 1, 13)),
+        (date(2027, 1, 14), date(2027, 1, 14), date(2027, 4, 14)),
+        (date(2026, 10, 14), date(2026, 7, 16), date(2026, 10, 14)),
     ],
 )
-def test_period_bounds_roll_forward_and_back(day: date, start: date, end: date) -> None:
-    # The bill in discussion #9: 22/07/26 to 21/10/26, 91 days.
-    assert period_bounds(date(2026, 7, 22), 91, day) == (start, end)
+def test_period_runs_from_the_day_after_a_read_to_the_next_read(day: date, start: date, end: date) -> None:
+    # A read on 14 Oct 2026 with the next due on 13 Jan 2027, 91 days later.
+    assert period_bounds(date(2026, 10, 14), 91, day) == (start, end)
+
+
+@pytest.mark.parametrize(
+    ("read_date", "day", "start", "end"),
+    [
+        # Discussion #9: "22/07/26 to 21/10/26 (91 days)", reads 92 days apart.
+        (date(2026, 10, 21), date(2026, 9, 1), date(2026, 7, 22), date(2026, 10, 21)),
+        # The maintainer's bill: "15/07/26 to 14/10/26 (91 days)".
+        (date(2026, 10, 14), date(2026, 8, 1), date(2026, 7, 15), date(2026, 10, 14)),
+    ],
+)
+def test_period_matches_real_bills(read_date: date, day: date, start: date, end: date) -> None:
+    assert period_bounds(read_date, 92, day) == (start, end)
+    assert (end - start).days == 91
 
 
 def test_usage_charge_matches_the_bill_from_discussion_9() -> None:
@@ -59,7 +73,8 @@ def test_daily_rate_uses_recent_days_with_readings() -> None:
 
 
 def test_build_period_part_way_through() -> None:
-    start, end = date(2026, 10, 21), date(2027, 1, 20)
+    # A bill printed as 91 days holds 92 calendar days.
+    start, end = date(2026, 10, 22), date(2027, 1, 21)
     last = start + timedelta(days=29)
     window = [day_of(start + timedelta(days=n), 500) for n in range(30)]
     period = build_period(start=start, end=end, last_day=last, usage=15_000, rates=STEPPED, window=window)
@@ -67,16 +82,16 @@ def test_build_period_part_way_through() -> None:
     assert period.days_with_data == 30
     assert period.allowance == 40_040
     assert period.step1_remaining == 25_040
-    assert period.daily_allowance == pytest.approx(25_040 / 61)
-    assert period.projected_usage == pytest.approx(15_000 + 500 * 61)
+    assert period.daily_allowance == pytest.approx(25_040 / 62)
+    assert period.projected_usage == pytest.approx(15_000 + 500 * 62)
     assert period.cost == pytest.approx(15 * 4.1047)
-    # 45.5 kL projected: 40.04 kL at step 1 and 5.46 kL at step 2.
-    assert period.projected_cost == pytest.approx(40.04 * 4.1047 + 5.46 * 5.2373)
+    # 46 kL projected: 40.04 kL at step 1 and 5.96 kL at step 2.
+    assert period.projected_cost == pytest.approx(40.04 * 4.1047 + 5.96 * 5.2373)
 
 
 def test_build_period_over_the_allowance() -> None:
-    start, end = date(2026, 10, 21), date(2027, 1, 20)
-    last = end - timedelta(days=1)
+    start, end = date(2026, 10, 22), date(2027, 1, 21)
+    last = end
     period = build_period(start=start, end=end, last_day=last, usage=50_000, rates=STEPPED, window=[])
     assert period.step1_remaining == 0
     # No days left.
@@ -85,13 +100,13 @@ def test_build_period_over_the_allowance() -> None:
 
 
 def test_build_period_flat_price_has_no_step_figures() -> None:
-    start, end = date(2026, 10, 21), date(2027, 1, 20)
+    start, end = date(2026, 10, 22), date(2027, 1, 21)
     period = build_period(start=start, end=end, last_day=start, usage=200, rates=FLAT, window=[])
     assert period.allowance is None
     assert period.step1_remaining is None
     assert period.daily_allowance is None
-    # No window: the period's own average carries the projection.
-    assert period.projected_usage == pytest.approx(200 * 91)
+    # No window: the period's own average carries the projection over its 92 calendar days.
+    assert period.projected_usage == pytest.approx(200 * 92)
 
 
 def test_build_period_before_any_reading_in_it() -> None:
@@ -99,4 +114,4 @@ def test_build_period_before_any_reading_in_it() -> None:
     period = build_period(start=start, end=end, last_day=start - timedelta(days=1), usage=0, rates=STEPPED, window=[])
     assert period.days_with_data == 0
     assert period.projected_usage == 0
-    assert period.daily_allowance == pytest.approx(40_040 / 91)
+    assert period.daily_allowance == pytest.approx(40_040 / 92)

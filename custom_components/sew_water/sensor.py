@@ -127,13 +127,13 @@ def _billing_value(read: Callable[[BillingPeriod], float | None]) -> Callable[[S
 
 
 def _billing_attributes(data: SewData) -> dict[str, Any]:
-    """Return the billing period's dates and step 1 allowance."""
+    """Return the billing period's dates, its day count as the bill gives it, and the step 1 allowance."""
     if (period := data.billing) is None:
         return {}
     return {
         "period_start": period.start.isoformat(),
         "period_end": period.end.isoformat(),
-        "days_in_period": period.days,
+        "billed_days": period.days,
         "days_with_data": period.days_with_data,
         "step1_allowance": period.allowance,
     }
@@ -206,7 +206,7 @@ async def async_setup_entry(
     """Create one entity per description, plus the recycled-water and billing-period sensors when relevant."""
     coordinator = entry.runtime_data
     descriptions = SENSORS + (RECYCLED_SENSORS if coordinator.recycled_meter is not None else ())
-    if coordinator.billing_anchor is not None:
+    if coordinator.last_read_date is not None:
         descriptions += tuple(
             replace(description, native_unit_of_measurement=hass.config.currency)
             if description.device_class is SensorDeviceClass.MONETARY

@@ -2,9 +2,13 @@
 
 South East Water charges step 1 on the first 440 litres a day *averaged over the billing period*: a
 91-day bill has 40,040 litres at step 1, however they were spread. So unlike the cost statistics, which
-apply the threshold per day, these figures use the bill's own rule. The integration does not know the
-billing dates; the user gives the first day of one bill and the period length, and periods are assumed
-to follow each other at that length.
+apply the threshold per day, these figures use the bill's own rule.
+
+A bill runs from the day after one meter read to the day of the next, and the bill counts its days as
+the difference between those two dates: reads on 14 July and 14 October give "15/07 to 14/10 (91 days)",
+although the period holds 92 calendar days. The step 1 allowance uses the bill's count. The integration
+does not know the read dates; the user gives the last one and the days between reads (both shown in the
+portal), and later reads are assumed to follow at that interval.
 """
 
 from __future__ import annotations
@@ -26,10 +30,10 @@ class BillingPeriod:
     """The current billing period, as far as the portal's readings go.
 
     Attributes:
-        start: First day of the period.
-        end: First day of the next period (the meter-read date printed as the period's end on the bill).
-        days: Days in the period, as the bill counts them (``end - start``).
-        days_with_data: Days from ``start`` up to the newest reading, at most ``days``.
+        start: First day of the period, the day after a meter read.
+        end: Last day of the period, the day of the next meter read.
+        days: Days in the period as the bill counts them (``end - start``, one less than its calendar days).
+        days_with_data: Calendar days from ``start`` up to the newest reading, at most ``days + 1``.
         usage: Litres used in the period so far.
         cost: Usage charge for ``usage`` with the bill's step rule, in dollars.
         allowance: Litres in the period charged at step 1, or None with a single flat price.
@@ -53,20 +57,20 @@ class BillingPeriod:
     projected_cost: float
 
 
-def period_bounds(anchor: date, length: int, day: date) -> tuple[date, date]:
+def period_bounds(read_date: date, read_days: int, day: date) -> tuple[date, date]:
     """Return the billing period containing ``day``.
 
     Args:
-        anchor: The first day of any one billing period.
-        length: Days in each period.
-        day: The day to locate; it may be before or after ``anchor``.
+        read_date: The date of any one meter read.
+        read_days: Days between meter reads.
+        day: The day to locate; it may be before or after ``read_date``.
 
     Returns:
-        The period's first day and the first day of the next period.
+        The period's first day (the day after a read) and last day (the day of the next read).
     """
-    offset = (day - anchor).days // length
-    start = anchor + timedelta(days=offset * length)
-    return start, start + timedelta(days=length)
+    offset = (day - read_date - timedelta(days=1)).days // read_days
+    previous_read = read_date + timedelta(days=offset * read_days)
+    return previous_read + timedelta(days=1), previous_read + timedelta(days=read_days)
 
 
 def usage_charge(litres: float, days: int, rates: Rates) -> float:
@@ -115,8 +119,8 @@ def build_period(
     """Work out the billing-period figures.
 
     Args:
-        start: First day of the period.
-        end: First day of the next period.
+        start: First day of the period, the day after a meter read.
+        end: Last day of the period, the day of the next meter read.
         last_day: The newest day with readings.
         usage: Litres used from ``start`` to ``last_day``.
         rates: The prices for the period.
@@ -126,8 +130,9 @@ def build_period(
         The period's figures.
     """
     days = (end - start).days
-    days_with_data = min(max((last_day - start).days + 1, 0), days)
-    remaining_days = days - days_with_data
+    calendar_days = days + 1
+    days_with_data = min(max((last_day - start).days + 1, 0), calendar_days)
+    remaining_days = calendar_days - days_with_data
     rate = daily_rate(window, last_day)
     if rate is None:
         rate = usage / days_with_data if days_with_data else 0.0

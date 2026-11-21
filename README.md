@@ -221,8 +221,10 @@ Setup finishes straight away with the last 90 days; the rest is imported in the 
 
 | Field | Default | Description |
 |---|---|---|
-| Billing period start | blank | The first day of any one of your bills, from the *For period* line under water usage. Setting it adds the [billing-period sensors](#entities); clearing it turns them off. |
-| Days in a billing period | 91 | The number of days your bill gives for the period. Quarterly bills are 90 to 92 days. Later periods are assumed to follow at this length, so when a new bill shows a different start date, update the date above. |
+| Last meter read date | blank | The *Meter read date* shown in the portal (or the last date on your latest bill's *For period* line). The current bill starts the day after it. Setting it adds the [billing-period sensors](#entities); clearing it turns them off. |
+| Days between meter reads | 91 | Days from that read to the next; the portal shows the next read date. Quarterly reads are 90 to 92 days apart. Later reads are assumed to follow at this interval, so after each read, update the date above. |
+
+A bill runs from the day after one read to the day of the next, and counts its days as the difference between those dates, one fewer than the days between reads: reads on 14 Jul and 14 Oct give *15/07/26 to 14/10/26 (91 days)*. The step 1 allowance uses the bill's count.
 
 Saving the options reloads the integration, which re-costs the last 30 days straight away. To re-cost older days with new prices, run `sew_water.import_from_date`.
 
@@ -288,18 +290,18 @@ All entities sit on one device, **South East Water**.
 
 The *Daily usage*, *Total usage* and *Last reading date* sensors are always the mains (potable) meter.
 
-**Billing-period sensors** are added for the mains meter when a [billing period](#options) is set. They cover the period containing yesterday and use South East Water's own step rule: step 1 for the first 440 L × the days in the period, however they were spread. So the usage cost here can be lower than the [cost statistic](#water-cost) for the same days, which applies the 440 L to each day.
+**Billing-period sensors** are added for the mains meter when a [billing period](#options) is set. They cover the period containing yesterday and use South East Water's own step rule: step 1 for the first 440 L × the bill's day count, however they were spread. So the usage cost here can be lower than the [cost statistic](#water-cost) for the same days, which applies the 440 L to each day.
 
 | Sensor | Unit | Description |
 |---|---|---|
-| `sensor.south_east_water_billing_period_usage` | L | Usage from the start of the period to the newest reading. Attributes: `period_start`, `period_end` (the first day of the next period), `days_in_period`, `days_with_data`, `step1_allowance`. |
+| `sensor.south_east_water_billing_period_usage` | L | Usage from the start of the period to the newest reading. Attributes: `period_start`, `period_end` (the next meter read day), `billed_days` (the day count the bill will show), `days_with_data`, `step1_allowance`. |
 | `sensor.south_east_water_billing_period_usage_cost` | currency | Usage charge for that usage. |
 | `sensor.south_east_water_step_1_litres_left` | L | Litres left at the step 1 price this period. |
 | `sensor.south_east_water_step_1_daily_allowance` | L | Litres a day you can use for the rest of the period and stay within step 1. |
 | `sensor.south_east_water_projected_billing_period_usage` | L | Usage by the end of the period, if the rest of it goes at the average of the last 14 days. |
 | `sensor.south_east_water_projected_billing_period_usage_cost` | currency | Usage charge for the projected usage. |
 
-The step 1 sensors are *Unknown* with a single flat custom price. Service charges and concessions are not included, and a period that spans 1 July is costed at the newer year's prices.
+The step 1 sensors are *Unknown* with a single flat custom price. Service charges and concessions are not included, and a period that spans 1 July is costed at the newer year's prices. Usage is read in whole days, so the read days at each end, which the bill splits at the time of the read, can put the figures out by part of a day's usage; a day the meter didn't report (missing from the portal's graph too) is missing here, though the bill still includes it.
 
 | Button | Description |
 |---|---|

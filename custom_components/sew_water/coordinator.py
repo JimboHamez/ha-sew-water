@@ -33,10 +33,9 @@ from .const import (
     BACKFILL_DAYS,
     BACKFILL_RETRY_MINUTES,
     CONF_BILLING_ACCOUNT_ID,
-    CONF_BILLING_DAYS,
-    CONF_BILLING_START,
     CONF_COOKIES,
     CONF_IMPORT_FROM,
+    CONF_LAST_READ_DATE,
     CONF_METER_ID,
     CONF_METER_KIND,
     CONF_METER_SERIAL,
@@ -45,11 +44,12 @@ from .const import (
     CONF_PRICE_RECYCLED,
     CONF_PRICE_STEP1,
     CONF_PRICE_STEP2,
+    CONF_READ_DAYS,
     CONF_SCAN_INTERVAL,
     CONF_STEP_THRESHOLD,
     CONF_TARIFF,
-    DEFAULT_BILLING_DAYS,
     DEFAULT_POLL_TIME,
+    DEFAULT_READ_DAYS,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_TARIFF,
     DOMAIN,
@@ -879,16 +879,17 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
     # ----------------------------------------------------------- billing period
 
     @property
-    def billing_anchor(self) -> date | None:
-        """Return the first day of a billing period from the options, or None when no period is set."""
-        if not (raw := self.config_entry.options.get(CONF_BILLING_START)):
+    def last_read_date(self) -> date | None:
+        """Return the meter read date from the options, or None when no billing period is set."""
+        if not (raw := self.config_entry.options.get(CONF_LAST_READ_DATE)):
             return None
         return dt_util.parse_date(str(raw))
 
     async def _async_billing_period(self, mains: MeterData) -> BillingPeriod | None:
         """Work out the mains meter's current billing period from its statistic.
 
-        The period is the one containing yesterday. Its usage is the statistic's running total less the
+        The period is the one containing yesterday, counting from the last meter read in the options at the
+        days between reads given there. Its usage is the statistic's running total less the
         total before the period started, so it covers the whole period even when that is longer than the
         trailing window.
 
@@ -898,10 +899,10 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
         Returns:
             The period's figures, or None when no billing period is set.
         """
-        if (anchor := self.billing_anchor) is None:
+        if (read_date := self.last_read_date) is None:
             return None
-        length = int(self.config_entry.options.get(CONF_BILLING_DAYS, DEFAULT_BILLING_DAYS))
-        start, end = period_bounds(anchor, length, dt_util.now().date() - timedelta(days=1))
+        read_days = int(self.config_entry.options.get(CONF_READ_DAYS, DEFAULT_READ_DAYS))
+        start, end = period_bounds(read_date, read_days, dt_util.now().date() - timedelta(days=1))
         last_day = next((day.day for day in reversed(mains.window) if day.available), None)
         if last_day is None:
             last_day = mains.latest.day if mains.latest else start - timedelta(days=1)

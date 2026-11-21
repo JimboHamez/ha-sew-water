@@ -13,11 +13,11 @@ import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.sew_water.const import (
-    CONF_BILLING_DAYS,
     CONF_BILLING_PERIOD,
-    CONF_BILLING_START,
+    CONF_LAST_READ_DATE,
     CONF_POLL_TIME,
     CONF_PRICE_STEP1,
+    CONF_READ_DAYS,
     CONF_SCAN_INTERVAL,
     CONF_TARIFF,
     DEFAULT_POLL_TIME,
@@ -42,9 +42,12 @@ BILLING_ENTITIES = {USAGE, COST, REMAINING, ALLOWANCE, PROJECTED_USAGE, PROJECTE
 LITRES_PER_DAY = 240
 
 
-def billing_entry(start: date, days: int = 91, **options: object) -> MockConfigEntry:
-    """Build a one-meter entry with a billing period starting on ``start``."""
-    return entry_with_options([IDS], **{CONF_BILLING_START: start.isoformat(), CONF_BILLING_DAYS: days, **options})
+def billing_entry(start: date, read_days: int = 91, **options: object) -> MockConfigEntry:
+    """Build a one-meter entry whose current billing period starts on ``start`` (the day after a read)."""
+    read_date = start - timedelta(days=1)
+    return entry_with_options(
+        [IDS], **{CONF_LAST_READ_DATE: read_date.isoformat(), CONF_READ_DAYS: read_days, **options}
+    )
 
 
 def number(hass: HomeAssistant, entity_id: str) -> float:
@@ -75,9 +78,11 @@ async def test_billing_period_sensors(hass: HomeAssistant, fake_client: FakeClie
     state = hass.states.get(USAGE)
     assert state is not None
     assert state.attributes["period_start"] == start.isoformat()
-    assert state.attributes["period_end"] == (start + timedelta(days=91)).isoformat()
+    # Reads 91 days apart: the period ends on the next read day, and the bill counts 90 days.
+    assert state.attributes["period_end"] == (start + timedelta(days=90)).isoformat()
+    assert state.attributes["billed_days"] == 90
     assert state.attributes["days_with_data"] == 5
-    assert state.attributes["step1_allowance"] == 440 * 91
+    assert state.attributes["step1_allowance"] == 440 * 90
     assert state.attributes["last_reset"] == dt_util.start_of_local_day(start).isoformat()
 
     assert number(hass, COST) == round(5 * LITRES_PER_DAY * rates.step1 / 1000, 2)
@@ -86,8 +91,9 @@ async def test_billing_period_sensors(hass: HomeAssistant, fake_client: FakeClie
     assert cost.attributes["unit_of_measurement"] == hass.config.currency
     assert cost.attributes["device_class"] == "monetary"
 
-    assert number(hass, REMAINING) == 440 * 91 - 5 * LITRES_PER_DAY
-    assert number(hass, ALLOWANCE) == round((440 * 91 - 5 * LITRES_PER_DAY) / 86, 2)
+    assert number(hass, REMAINING) == 440 * 90 - 5 * LITRES_PER_DAY
+    # 91 calendar days, 5 with readings.
+    assert number(hass, ALLOWANCE) == round((440 * 90 - 5 * LITRES_PER_DAY) / 86, 2)
     assert number(hass, PROJECTED_USAGE) == 91 * LITRES_PER_DAY
     assert number(hass, PROJECTED_COST) == round(91 * LITRES_PER_DAY * rates.step1 / 1000, 2)
     projected = hass.states.get(PROJECTED_COST)
@@ -109,7 +115,7 @@ async def test_period_older_than_the_trailing_window_reads_the_statistic(
 
 async def test_period_rolls_forward_from_an_old_start(hass: HomeAssistant, fake_client: FakeClient) -> None:
     start = yesterday() - timedelta(days=2)
-    await setup_entry(hass, billing_entry(start - timedelta(days=30 * 4), days=30))
+    await setup_entry(hass, billing_entry(start - timedelta(days=30 * 4), read_days=30))
     state = hass.states.get(USAGE)
     assert state is not None
     assert state.attributes["period_start"] == start.isoformat()
@@ -141,7 +147,7 @@ async def test_period_with_no_readings_yet(hass: HomeAssistant, fake_client: Fak
 async def test_options_flow_sets_and_clears_the_billing_period(
     hass: HomeAssistant, setup_integration: MockConfigEntry
 ) -> None:
-    start = yesterday() - timedelta(days=10)
+    read_date = yesterday() - timedelta(days=10)
     base = {
         CONF_SCAN_INTERVAL: DEFAULT_SCAN_INTERVAL,
         CONF_POLL_TIME: DEFAULT_POLL_TIME,
@@ -150,18 +156,18 @@ async def test_options_flow_sets_and_clears_the_billing_period(
     result = await hass.config_entries.options.async_init(setup_integration.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {**base, CONF_BILLING_PERIOD: {CONF_BILLING_START: start.isoformat(), CONF_BILLING_DAYS: 92}},
+        {**base, CONF_BILLING_PERIOD: {CONF_LAST_READ_DATE: read_date.isoformat(), CONF_READ_DAYS: 92}},
     )
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert setup_integration.options[CONF_BILLING_START] == start.isoformat()
-    assert setup_integration.options[CONF_BILLING_DAYS] == 92
+    assert setup_integration.options[CONF_LAST_READ_DATE] == read_date.isoformat()
+    assert setup_integration.options[CONF_READ_DAYS] == 92
     assert hass.states.get(USAGE) is not None
 
     result = await hass.config_entries.options.async_init(setup_integration.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {**base, CONF_BILLING_PERIOD: {CONF_BILLING_DAYS: 92}}
+        result["flow_id"], {**base, CONF_BILLING_PERIOD: {CONF_READ_DAYS: 92}}
     )
     await hass.async_block_till_done()
-    assert CONF_BILLING_START not in setup_integration.options
+    assert CONF_LAST_READ_DATE not in setup_integration.options
     assert setup_integration.runtime_data.data.billing is None

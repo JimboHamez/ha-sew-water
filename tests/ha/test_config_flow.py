@@ -16,7 +16,6 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.sew_water.config_flow import mask_email
 from custom_components.sew_water.const import (
     CONF_BILLING_ACCOUNT_ID,
-    CONF_BILLING_DAYS,
     CONF_BILLING_PERIOD,
     CONF_COOKIES,
     CONF_IMPORT_FROM,
@@ -27,9 +26,10 @@ from custom_components.sew_water.const import (
     CONF_MFA_CODE,
     CONF_POLL_TIME,
     CONF_PROPERTY,
+    CONF_READ_DAYS,
     CONF_SCAN_INTERVAL,
     CONF_TARIFF,
-    DEFAULT_BILLING_DAYS,
+    DEFAULT_READ_DAYS,
     DOMAIN,
     ENTRY_TITLE,
     TARIFF_WATER_SEWAGE,
@@ -558,12 +558,12 @@ async def test_options_flow_sets_scan_interval_and_poll_time(
     assert result["step_id"] == "init"
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
-        {CONF_SCAN_INTERVAL: 360, CONF_POLL_TIME: "10:30:00", CONF_BILLING_PERIOD: {CONF_BILLING_DAYS: 91}},
+        {CONF_SCAN_INTERVAL: 360, CONF_POLL_TIME: "10:30:00", CONF_BILLING_PERIOD: {CONF_READ_DAYS: 91}},
     )
     await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert setup_integration.options == {
-        CONF_BILLING_DAYS: DEFAULT_BILLING_DAYS,
+        CONF_READ_DAYS: DEFAULT_READ_DAYS,
         CONF_POLL_TIME: "10:30:00",
         CONF_SCAN_INTERVAL: 360,
         CONF_TARIFF: TARIFF_WATER_SEWAGE,
