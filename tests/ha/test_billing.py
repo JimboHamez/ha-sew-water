@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from unittest.mock import patch
 
+from homeassistant.components.recorder import get_instance
 from homeassistant.const import STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -110,6 +112,15 @@ async def test_period_older_than_the_trailing_window_reads_the_statistic(
     await entry.runtime_data.async_poll_now()
     first, _last = fake_client.fetch_ranges[-1]
     assert first > start
+    assert number(hass, USAGE) == 5 * LITRES_PER_DAY
+
+
+async def test_first_refresh_does_not_wait_for_the_recorder(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    # While Home Assistant starts, the recorder holds its queue until startup finishes, so waiting for it
+    # to commit inside the first refresh would hang setup until the bootstrap timeout.
+    start = yesterday() - timedelta(days=4)
+    with patch.object(get_instance(hass), "async_block_till_done", side_effect=AssertionError("waited")):
+        await setup_entry(hass, billing_entry(start))
     assert number(hass, USAGE) == 5 * LITRES_PER_DAY
 
 

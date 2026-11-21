@@ -885,6 +885,26 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             return None
         return dt_util.parse_date(str(raw))
 
+    async def _async_period_usage(self, mains: MeterData, start: date) -> float:
+        """Return the litres a meter has used from ``start`` up to its newest imported day.
+
+        The rows this poll imported are only queued with the recorder, and waiting for it to commit them
+        would deadlock while Home Assistant starts (the recorder holds its queue until startup finishes,
+        which in turn waits for this first refresh). So a period that starts inside the fetched window is
+        summed from the window itself, and an older one reads only rows from before the window, which
+        this poll did not touch.
+
+        Args:
+            mains: The meter's state after this poll's import.
+            start: First day of the billing period.
+
+        Returns:
+            The litres used in the period so far.
+        """
+        if mains.window and start >= mains.window[0].day:
+            return sum(sum(self._hourly_litres(day)) for day in mains.window if day.day >= start)
+        return mains.total_litres - await self._async_sum_before(statistic_id_for(mains.ids), start)
+
     async def _async_billing_period(self, mains: MeterData) -> BillingPeriod | None:
         """Work out the mains meter's current billing period from its statistic.
 
@@ -908,9 +928,7 @@ class SewCoordinator(DataUpdateCoordinator[SewData]):
             last_day = mains.latest.day if mains.latest else start - timedelta(days=1)
         usage = 0.0
         if last_day >= start:
-            # The rows just imported are queued with the recorder; let it commit them before reading back.
-            await get_instance(self.hass).async_block_till_done()
-            usage = mains.total_litres - await self._async_sum_before(statistic_id_for(mains.ids), start)
+            usage = await self._async_period_usage(mains, start)
         return build_period(
             start=start,
             end=end,
