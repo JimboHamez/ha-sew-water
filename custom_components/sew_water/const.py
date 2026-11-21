@@ -7,7 +7,8 @@ from typing import Final
 DOMAIN: Final = "sew_water"
 
 ATTRIBUTION: Final = "Data provided by South East Water"
-MANUFACTURER: Final = "South East Water"
+# Shown as the device's "by" line: the integration's author, since South East Water did not make it.
+MANUFACTURER: Final = "JimboHamez"
 # Config entry title. Not the login email, because Home Assistant writes entry titles into its logs.
 ENTRY_TITLE: Final = "South East Water"
 
