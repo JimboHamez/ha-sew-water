@@ -43,7 +43,7 @@ async def test_entities_are_created_on_one_device(
     (device,) = dr.async_entries_for_config_entry(device_registry, setup_integration.entry_id)
     assert device.identifiers == {(DOMAIN, setup_integration.entry_id)}
     assert device.manufacturer == MANUFACTURER
-    assert device.name == MANUFACTURER
+    assert device.name == "South East Water"
     assert len({entry.device_id for entry in entries}) == 1
 
 

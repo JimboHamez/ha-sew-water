@@ -34,6 +34,7 @@ from custom_components.sew_water.const import (
     SERVICE_ATTR_START_DATE,
     SERVICE_FORCE_IMPORT,
     SERVICE_IMPORT_FROM_DATE,
+    STATISTIC_ID_COST_MAINS,
     STATISTIC_ID_MAINS,
     STATISTIC_ID_RECYCLED,
 )
@@ -102,14 +103,18 @@ def fetched_serials(fake_client: FakeClient) -> list[str | None]:
     return [serial for serial, _start, _end in fake_client.fetches]
 
 
-async def seed_mains_statistic(hass: HomeAssistant, day: date, litres_per_hour: float) -> None:
-    """Write one day of hourly rows into the mains statistic, as an earlier version would have."""
+async def seed_mains_statistic(hass: HomeAssistant, day: date, litres_per_hour: float, cost: bool = False) -> None:
+    """Write one day of hourly rows into the mains statistic, as an earlier version would have.
+
+    With ``cost``, the mains cost statistic gets the same rows, as a version with costs would have written.
+    """
     start = dt_util.as_utc(dt_util.start_of_local_day(day))
     rows = [
         StatisticData(start=start + timedelta(hours=h), state=litres_per_hour, sum=litres_per_hour * (h + 1))
         for h in range(24)
     ]
-    async_add_external_statistics(hass, SewCoordinator._metadata(STATISTIC_ID_MAINS), rows)
+    for statistic_id in (STATISTIC_ID_MAINS, STATISTIC_ID_COST_MAINS) if cost else (STATISTIC_ID_MAINS,):
+        async_add_external_statistics(hass, SewCoordinator._metadata(statistic_id), rows)
     await async_wait_recording_done(hass)
 
 
@@ -319,7 +324,7 @@ async def test_upgrade_of_an_entry_that_stored_the_mains_meter_keeps_its_statist
     hass: HomeAssistant, two_meters: FakeClient
 ) -> None:
     old_day = yesterday() - timedelta(days=BACKFILL_DAYS + 20)
-    await seed_mains_statistic(hass, old_day, 7)
+    await seed_mains_statistic(hass, old_day, 7, cost=True)
     with patch.object(coordinator_module._LOGGER, "info") as info:
         entry = await setup_entry(hass, make_entry(entry_data(None)))
     info.assert_not_called()

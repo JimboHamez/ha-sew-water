@@ -7,14 +7,19 @@ from typing import Final
 DOMAIN: Final = "sew_water"
 
 ATTRIBUTION: Final = "Data provided by South East Water"
-MANUFACTURER: Final = "South East Water"
+# Shown as the device's "by" line: the integration's author, since South East Water did not make it.
+MANUFACTURER: Final = "JimboHamez"
 # Config entry title. Not the login email, because Home Assistant writes entry titles into its logs.
 ENTRY_TITLE: Final = "South East Water"
 
 # Config-entry data keys (username/password use homeassistant.const).
 CONF_BILLING_ACCOUNT_ID: Final = "billing_account_id"
+# Billing period (options section; its fields are stored flat).
+CONF_BILLING_PERIOD: Final = "billing_period"
 CONF_COOKIES: Final = "cookies"
 CONF_IMPORT_FROM: Final = "import_from"
+# The date of a meter read (ISO date) and the days between reads, from the portal; they set the billing period.
+CONF_LAST_READ_DATE: Final = "last_read_date"
 # The mains meter, which every version has polled; kept so older entries and downgrades keep working.
 CONF_METER_ID: Final = "meter_id"
 CONF_METER_KIND: Final = "meter_kind"
@@ -25,9 +30,29 @@ CONF_METERS: Final = "meters"
 CONF_MFA_CHANNEL: Final = "mfa_channel"
 CONF_MFA_CODE: Final = "mfa_code"
 CONF_POLL_TIME: Final = "poll_time"
+# Custom usage prices (options), used when the tariff option is TARIFF_CUSTOM.
+CONF_PRICE_RECYCLED: Final = "price_recycled"
+CONF_PRICE_STEP1: Final = "price_step1"
+CONF_PRICE_STEP2: Final = "price_step2"
 # The setup flow's property picker; its value is an index into the flow's property list, never stored.
 CONF_PROPERTY: Final = "property"
+CONF_READ_DAYS: Final = "read_days"
 CONF_SCAN_INTERVAL: Final = "scan_interval"
+CONF_STEP_THRESHOLD: Final = "step_threshold"
+# Which usage prices the cost statistics use (option).
+CONF_TARIFF: Final = "tariff"
+
+# Tariffs. The first three are South East Water's published prices (see pricing.py); recycled is used only
+# for the recycled-water meter and is not offered as a choice.
+TARIFF_CUSTOM: Final = "custom"
+TARIFF_RECYCLED: Final = "recycled"
+TARIFF_WATER_ONLY: Final = "water_only"
+TARIFF_WATER_SEWAGE: Final = "water_sewage"
+DEFAULT_TARIFF: Final = TARIFF_WATER_SEWAGE
+# South East Water reads residential meters quarterly, 90 to 92 days apart.
+DEFAULT_READ_DAYS: Final = 91
+MAX_READ_DAYS: Final = 366
+MIN_READ_DAYS: Final = 2
 
 # Days of history imported the first time the integration runs.
 BACKFILL_DAYS: Final = 90
@@ -52,6 +77,7 @@ POLL_JITTER_MINUTES: Final = 10
 KEEPALIVE_MINUTES: Final = 30
 
 ISSUE_BACKFILL_FAILED: Final = "backfill_failed"
+ISSUE_PRICES_OUT_OF_DATE: Final = "prices_out_of_date"
 
 SERVICE_FORCE_IMPORT: Final = "force_import"
 SERVICE_IMPORT_FROM_DATE: Final = "import_from_date"
@@ -59,3 +85,5 @@ SERVICE_ATTR_START_DATE: Final = "start_date"
 
 STATISTIC_ID_MAINS: Final = f"{DOMAIN}:water_usage_mains"
 STATISTIC_ID_RECYCLED: Final = f"{DOMAIN}:water_usage_recycled"
+STATISTIC_ID_COST_MAINS: Final = f"{DOMAIN}:water_cost_mains"
+STATISTIC_ID_COST_RECYCLED: Final = f"{DOMAIN}:water_cost_recycled"

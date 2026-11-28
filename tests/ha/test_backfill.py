@@ -23,6 +23,7 @@ from custom_components.sew_water.const import (
     CONF_METERS,
     DOMAIN,
     ISSUE_BACKFILL_FAILED,
+    STATISTIC_ID_COST_MAINS,
 )
 from custom_components.sew_water.coordinator import meters_to_data
 from custom_components.sew_water.sew_client import SewConnectionError
@@ -38,6 +39,8 @@ from .conftest import (
     USERNAME,
     FakeClient,
 )
+from .test_coordinator import read_rows
+from .test_meters import seed_mains_statistic
 
 TOTAL = "sensor.south_east_water_total_usage"
 
@@ -167,3 +170,14 @@ async def test_dead_session_during_import_starts_reauth(hass: HomeAssistant, fak
 
 async def test_entry_without_history_starts_no_task(hass: HomeAssistant, setup_integration: MockConfigEntry) -> None:
     assert setup_integration.runtime_data.backfill_task is None
+
+
+async def test_usage_history_without_costs_is_imported_again(hass: HomeAssistant, fake_client: FakeClient) -> None:
+    """An install upgraded from a version without costs gets its cost history back to the installation date."""
+    yesterday = dt_util.now().date() - timedelta(days=1)
+    start = yesterday - timedelta(days=BACKFILL_DAYS + 9)
+    await seed_mains_statistic(hass, start, 10)
+    await setup_with_history(hass, start)
+    assert fake_client.fetch_ranges[-1] == (start, yesterday)
+    cost = await read_rows(hass, STATISTIC_ID_COST_MAINS)
+    assert dt_util.as_local(cost[0][0]).date() == start

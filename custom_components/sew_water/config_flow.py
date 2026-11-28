@@ -15,8 +15,9 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     OptionsFlowWithReload,
 )
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfTime
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, UnitOfTime, UnitOfVolume
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.selector import (
     DateSelector,
@@ -40,23 +41,40 @@ import voluptuous as vol
 
 from .const import (
     CONF_BILLING_ACCOUNT_ID,
+    CONF_BILLING_PERIOD,
     CONF_COOKIES,
     CONF_IMPORT_FROM,
+    CONF_LAST_READ_DATE,
     CONF_METER_ID,
     CONF_METER_SERIAL,
     CONF_METERS,
     CONF_MFA_CHANNEL,
     CONF_MFA_CODE,
     CONF_POLL_TIME,
+    CONF_PRICE_RECYCLED,
+    CONF_PRICE_STEP1,
+    CONF_PRICE_STEP2,
     CONF_PROPERTY,
+    CONF_READ_DAYS,
     CONF_SCAN_INTERVAL,
+    CONF_STEP_THRESHOLD,
+    CONF_TARIFF,
     DEFAULT_POLL_TIME,
+    DEFAULT_READ_DAYS,
     DEFAULT_SCAN_INTERVAL,
+    DEFAULT_TARIFF,
     DOMAIN,
     ENTRY_TITLE,
+    MAX_READ_DAYS,
+    MIN_READ_DAYS,
     MIN_SCAN_INTERVAL,
+    TARIFF_CUSTOM,
+    TARIFF_RECYCLED,
+    TARIFF_WATER_ONLY,
+    TARIFF_WATER_SEWAGE,
 )
 from .coordinator import SewConfigEntry, meters_to_data
+from .pricing import STEP_THRESHOLD_LITRES, published_rates
 from .sew_client import (
     SewAuthError,
     SewClient,
@@ -406,18 +424,33 @@ class SewConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
+# A price in dollars per kilolitre; "any" step because South East Water publishes four decimal places.
+PRICE_SELECTOR = NumberSelector(NumberSelectorConfig(min=0, step="any", mode=NumberSelectorMode.BOX))
+
+
 class SewOptionsFlow(OptionsFlowWithReload):
-    """Let the user change the poll interval and time; the entry reloads automatically on save."""
+    """Let the user change polling and the prices used for costs; the entry reloads automatically on save."""
+
+    def __init__(self) -> None:
+        """Hold the first page's answers until the custom prices page is saved."""
+        self._options: dict[str, Any] = {}
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Show and save the options."""
+        """Show and save the polling options and the tariff; custom prices go on to a second page."""
         if user_input is not None:
-            return self.async_create_entry(
-                data={
-                    CONF_POLL_TIME: user_input[CONF_POLL_TIME],
-                    CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
-                }
-            )
+            billing = user_input.get(CONF_BILLING_PERIOD, {})
+            self._options = {
+                CONF_READ_DAYS: int(billing.get(CONF_READ_DAYS, DEFAULT_READ_DAYS)),
+                CONF_POLL_TIME: user_input[CONF_POLL_TIME],
+                CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL]),
+                CONF_TARIFF: user_input[CONF_TARIFF],
+            }
+            # A cleared read date turns the billing-period sensors off.
+            if billing.get(CONF_LAST_READ_DATE):
+                self._options[CONF_LAST_READ_DATE] = billing[CONF_LAST_READ_DATE]
+            if user_input[CONF_TARIFF] == TARIFF_CUSTOM:
+                return await self.async_step_custom_prices()
+            return self.async_create_entry(data=self._options)
         options = self.config_entry.options
         schema = vol.Schema(
             {
@@ -432,6 +465,79 @@ class SewOptionsFlow(OptionsFlowWithReload):
                     )
                 ),
                 vol.Required(CONF_POLL_TIME, default=options.get(CONF_POLL_TIME, DEFAULT_POLL_TIME)): TimeSelector(),
+                vol.Required(CONF_TARIFF, default=options.get(CONF_TARIFF, DEFAULT_TARIFF)): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[TARIFF_WATER_SEWAGE, TARIFF_WATER_ONLY, TARIFF_CUSTOM],
+                        mode=SelectSelectorMode.LIST,
+                        translation_key=CONF_TARIFF,
+                    )
+                ),
+                vol.Required(CONF_BILLING_PERIOD): section(
+                    vol.Schema(  # type: ignore[arg-type]
+                        {
+                            vol.Optional(
+                                CONF_LAST_READ_DATE,
+                                description={"suggested_value": options.get(CONF_LAST_READ_DATE)},
+                            ): DateSelector(),
+                            vol.Required(
+                                CONF_READ_DAYS, default=options.get(CONF_READ_DAYS, DEFAULT_READ_DAYS)
+                            ): NumberSelector(
+                                NumberSelectorConfig(
+                                    min=MIN_READ_DAYS,
+                                    max=MAX_READ_DAYS,
+                                    step=1,
+                                    unit_of_measurement=UnitOfTime.DAYS,
+                                    mode=NumberSelectorMode.BOX,
+                                )
+                            ),
+                        }
+                    ),
+                    # Open when a period is set, so the user sees it; folded away otherwise.
+                    {"collapsed": CONF_LAST_READ_DATE not in options},
+                ),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)  # type: ignore[arg-type]
+
+    async def async_step_custom_prices(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask for the custom usage prices; a blank step 2 price means one flat price."""
+        if user_input is not None:
+            prices: dict[str, Any] = {
+                CONF_PRICE_STEP1: float(user_input[CONF_PRICE_STEP1]),
+                CONF_STEP_THRESHOLD: float(user_input[CONF_STEP_THRESHOLD]),
+            }
+            for key in (CONF_PRICE_STEP2, CONF_PRICE_RECYCLED):
+                if user_input.get(key) is not None:
+                    prices[key] = float(user_input[key])
+            return self.async_create_entry(data={**self._options, **prices})
+        # Start from the saved custom prices (a blank one stays blank), or else today's published water and
+        # sewage prices.
+        options = self.config_entry.options
+        if options.get(CONF_TARIFF) == TARIFF_CUSTOM:
+            suggested = {key: options.get(key) for key in (CONF_PRICE_RECYCLED, CONF_PRICE_STEP1, CONF_PRICE_STEP2)}
+            suggested[CONF_STEP_THRESHOLD] = options.get(CONF_STEP_THRESHOLD, STEP_THRESHOLD_LITRES)
+        else:
+            today = dt_util.now().date()
+            published = published_rates(today, TARIFF_WATER_SEWAGE)
+            suggested = {
+                CONF_PRICE_RECYCLED: published_rates(today, TARIFF_RECYCLED).step1,
+                CONF_PRICE_STEP1: published.step1,
+                CONF_PRICE_STEP2: published.step2,
+                CONF_STEP_THRESHOLD: STEP_THRESHOLD_LITRES,
+            }
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_PRICE_STEP1): PRICE_SELECTOR,
+                vol.Optional(CONF_PRICE_STEP2): PRICE_SELECTOR,
+                vol.Required(CONF_STEP_THRESHOLD): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0, step=1, unit_of_measurement=UnitOfVolume.LITERS, mode=NumberSelectorMode.BOX
+                    )
+                ),
+                vol.Optional(CONF_PRICE_RECYCLED): PRICE_SELECTOR,
+            }
+        )
+        return self.async_show_form(
+            step_id="custom_prices",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested),  # type: ignore[arg-type]
+        )

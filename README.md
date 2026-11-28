@@ -18,6 +18,7 @@ Daily mains water usage from the [South East Water](https://my.southeastwater.co
 It gives you:
 
 - **Energy dashboard water** — one long-term statistic, `sew_water:water_usage_mains`, with a row for every **hour**, so the dashboard's hourly, daily, weekly and monthly views are all real. A property with a recycled-water meter gets a second one, `sew_water:water_usage_recycled`.
+- **Water cost** — a matching cost statistic, `sew_water:water_cost_mains` (and `sew_water:water_cost_recycled`), worked out every hour from South East Water's published usage prices or your own, for the Energy dashboard's water card.
 - **Sensors** — yesterday's litres (with the 24 hourly readings as attributes), a running total and the reading date.
 - **One login** — sign in once with your portal email, password and a one-time code; the session is kept and re-used, and survives restarts.
 - **Late data handled** — the portal publishes readings a day or two late and sometimes corrects them, so every poll re-imports the last 30 days.
@@ -35,7 +36,13 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.3.1
+## 🆕 What's new in v2.4.0
+
+- **Water cost in the Energy dashboard** ([#9](https://github.com/JimboHamez/ha-sew-water/discussions/9), thanks [@Tronadorau](https://github.com/Tronadorau) and [@vincentq](https://github.com/vincentq)). New statistics `sew_water:water_cost_mains` (and `sew_water:water_cost_recycled`) cost every hour's usage at South East Water's published prices, or at your own. In the water source dialog choose *Use an entity tracking the total costs* and pick the cost statistic ([how](#water-cost)). Past cost is imported once after updating.
+- **Billing-period sensors.** Set your last meter read date under the new **Billing period** options to see this bill's usage and cost so far, the litres left at the step 1 price, a daily allowance to stay within it, and the projected usage and cost for the whole bill ([details](#entities)).
+- **Usage charges only.** Fixed service charges and concessions aren't included. The cost statistic applies step 2 to each day, so it can read a little higher than the bill when usage is uneven.
+
+From v2.3.1:
 
 - **Choose your property** ([#16](https://github.com/JimboHamez/ha-sew-water/issues/16), thanks [@Oscar2024](https://github.com/Oscar2024)). If your login holds more than one property with a digital meter, such as your home and an investment property, setup now asks which one to read, with a drop-down of the addresses. Earlier versions took the first one the portal listed, which could be a property with no usage, leaving the sensors at *Unknown* / 0.00 L. Re-authentication and Reconfigure keep your choice.
 - **Affected?** Remove the integration, delete `sew_water:water_usage_mains` in *Developer tools → Statistics* (it holds the wrong property's 0 L days), then add it again and pick your property.
@@ -79,7 +86,7 @@ From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/Ji
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.3.1).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.4.0).
 
 ---
 
@@ -138,7 +145,7 @@ Repositories added from a link are checked for updates every 48 hours, so a new 
 2. Remove the files. Marketplace: **Settings → Marketplace** → **South East Water** → remove it. HACS: HACS → **South East Water** → ⋮ → **Remove**. Manual install: delete `config/custom_components/sew_water/`.
 3. Restart Home Assistant.
 
-One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** (and `sew_water:water_usage_recycled`, if you have a recycled meter) and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
+One thing is deliberately left behind: the **`sew_water:water_usage_mains` statistic** (and `sew_water:water_usage_recycled`, if you have a recycled meter, plus the matching `sew_water:water_cost_…` statistics) and its history stay in the recorder database, so reinstalling picks up where you left off. To delete it, use *Settings → Developer tools → Statistics* and remove the orphaned entry.
 
 The integration uses only `aiohttp`, which ships with Home Assistant — nothing else to install.
 
@@ -205,6 +212,27 @@ Setup finishes straight away with the last 90 days; the rest is imported in the 
 |---|---|---|
 | Poll interval | 1440 min | Minutes between polls. At the default the poll is pinned to the **poll time** below every day; any other value (minimum 60) is used as a plain interval. |
 | Poll time | 02:00 | Local time of the daily poll. Only used at the default interval. The portal publishes the previous day's readings during the morning; if *Daily usage* is still a day behind after the poll, move this later (10:00 has been reported to work). |
+| Prices for water cost | South East Water: water and sewage | The usage prices behind the [cost statistics](#water-cost). *Water and sewage* suits most homes connected to sewerage; your bill says which you pay. *Water only* is the other published tariff. *Custom prices* opens a second page. |
+
+**Custom prices** (only when chosen above), in dollars per kilolitre as printed on your bill:
+
+| Field | Default | Description |
+|---|---|---|
+| Step 1 price | today's published price | Price for usage up to the daily allowance, or for all usage if there is no step 2 price. |
+| Step 2 price | today's published price | Price for usage above the daily allowance. Leave blank for one flat price. |
+| Step 1 allowance per day | 440 L | Litres a day charged at the step 1 price. |
+| Recycled water price | today's published price | Only used with a recycled-water meter. Leave blank to keep South East Water's published price. |
+
+**Billing period** (a folded section; optional):
+
+| Field | Default | Description |
+|---|---|---|
+| Last meter read date | blank | The *Meter read date* shown in the portal (or the last date on your latest bill's *For period* line). The current bill starts the day after it. Setting it adds the [billing-period sensors](#entities); clearing it turns them off. |
+| Days between meter reads | 91 | Days from that read to the next; the portal shows the next read date. Quarterly reads are 90 to 92 days apart. Later reads are assumed to follow at this interval, so after each read, update the date above. |
+
+A bill runs from the day after one read to the day of the next, and counts its days as the difference between those dates, one fewer than the days between reads: reads on 14 Jul and 14 Oct give *15/07/26 to 14/10/26 (91 days)*. The step 1 allowance uses the bill's count.
+
+Saving the options reloads the integration, which re-costs the last 30 days straight away. To re-cost older days with new prices, run `sew_water.import_from_date`.
 
 ### Re-authentication
 
@@ -241,6 +269,16 @@ The protocol, the statistics rules and every design decision are in [DESIGN_DOCU
 
 > ⚠️ Use the statistic, not the `Total usage` sensor. The statistic has one row per hour with the correct timestamp, including back-filled and corrected days. The sensor only changes once per poll, so the dashboard would attribute a whole day's usage to the minute the poll ran.
 
+### Water cost
+
+In the same water source dialog, choose **Use an entity tracking the total costs** and pick **`sew_water:water_cost_mains`** (or **`sew_water:water_cost_recycled`** for the recycled source). Home Assistant doesn't accept a static or entity price for a water source that comes from a statistic, so this is the way to get cost on the water card.
+
+How each hour is costed:
+
+- **Usage charges only.** Fixed quarterly service charges (water, sewerage, Parks, Waterways and Drainage) and concessions are not included.
+- **Prices by financial year.** South East Water's published residential prices are built in for each financial year from 2025-26, and every day uses the prices of its own year. Days before 1 July 2025 use the 2025-26 prices. When a new financial year starts before this integration has its prices, a **Repairs** issue says so and the newest known prices are used until you update (or switch to custom prices).
+- **Step 2 per day.** South East Water charges step 2 on usage above 440 L a day *averaged over the billing period*. The cost statistic is written hour by hour, before the bill's total is known, so it applies the 440 L to each day instead (the [billing-period sensors](#entities) use the bill's own rule). Over a bill this matches exactly when every day is on the same side of 440 L, and otherwise reads a little high, never low: a day of heavy garden watering counts as step 2 even if quiet days elsewhere in the bill would have averaged it out.
+
 ---
 
 ## Entities
@@ -257,6 +295,19 @@ All entities sit on one device, **South East Water**.
 | `sensor.south_east_water_recycled_last_reading_date` | date | Only with a recycled-water meter. The same as *Last reading date*, for the recycled meter; **disabled by default**. |
 
 The *Daily usage*, *Total usage* and *Last reading date* sensors are always the mains (potable) meter.
+
+**Billing-period sensors** are added for the mains meter when a [billing period](#options) is set. They cover the period containing yesterday and use South East Water's own step rule: step 1 for the first 440 L × the bill's day count, however they were spread. So the usage cost here can be lower than the [cost statistic](#water-cost) for the same days, which applies the 440 L to each day.
+
+| Sensor | Unit | Description |
+|---|---|---|
+| `sensor.south_east_water_billing_period_usage` | L | Usage from the start of the period to the newest reading. Attributes: `period_start`, `period_end` (the next meter read day), `billed_days` (the day count the bill will show), `days_with_data`, `step1_allowance`. |
+| `sensor.south_east_water_billing_period_usage_cost` | currency | Usage charge for that usage. |
+| `sensor.south_east_water_step_1_litres_left` | L | Litres left at the step 1 price this period. |
+| `sensor.south_east_water_step_1_daily_allowance` | L | Litres a day you can use for the rest of the period and stay within step 1. |
+| `sensor.south_east_water_projected_billing_period_usage` | L | Usage by the end of the period, if the rest of it goes at the average of the last 14 days. |
+| `sensor.south_east_water_projected_billing_period_usage_cost` | currency | Usage charge for the projected usage. |
+
+The step 1 sensors are *Unknown* with a single flat custom price. Service charges and concessions are not included, and a period that spans 1 July is costed at the newer year's prices. Usage is read in whole days, so the read days at each end, which the bill splits at the time of the read, can put the figures out by part of a day's usage; a day the meter didn't report (missing from the portal's graph too) is missing here, though the bill still includes it.
 
 | Button | Description |
 |---|---|
@@ -375,7 +426,7 @@ actions:
 - **Upgrading from 2.2 or earlier with a recycled meter.** Earlier versions read whichever digital meter the portal listed first, which on some properties was the recycled one, so `sew_water:water_usage_mains` held recycled water. On the first start after the update the integration lists the meters, switches to the mains meter and, if the old one was recycled, clears `sew_water:water_usage_mains` and imports it again (from the installation date given at setup, or the last 90 days). The recycled meter's history goes into `sew_water:water_usage_recycled`.
 - **Backfill on first setup is 90 days** unless you give an installation date in the wizard. `sew_water.import_from_date` covers anything else.
 - **Sensor totals versus statistics.** The *Total usage* sensor changes once per poll, so its history attributes the whole day to the minute the poll ran. Use the statistic for the Energy dashboard.
-- **No water cost yet.** Home Assistant doesn't accept a $/L price for a water source that comes from a long-term statistic, which is how this integration feeds the Energy dashboard, so the water card can't show cost. Adding a cost statistic built from South East Water's published prices is being discussed in [#9](https://github.com/JimboHamez/ha-sew-water/discussions/9).
+- **Water cost is an estimate of usage charges.** Step 2 is worked out per day rather than over the billing period, so it can read a little higher than the bill on uneven usage, and service charges and concessions are left out. See [Water cost](#water-cost).
 - **The portal is not an API.** The integration speaks the portal's own web protocol; a change on South East Water's side can stop it working until the integration is updated. The client is isolated in one module to keep such fixes small.
 
 ---

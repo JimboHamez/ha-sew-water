@@ -107,14 +107,46 @@
   "options": {
     "step": {
       "init": {
-        "title": "Polling",
+        "title": "Options",
         "data": {
           "poll_time": "Poll time",
-          "scan_interval": "Poll interval"
+          "scan_interval": "Poll interval",
+          "tariff": "Prices for water cost"
         },
         "data_description": {
           "poll_time": "Local time of day for the daily poll. Only used at the default interval of 1440 minutes. The portal publishes the previous day's readings during the morning; if yesterday is still missing after the poll, move this later.",
-          "scan_interval": "Minutes between polls. At the default of 1440 the poll runs once a day at the poll time below; any other value is used as a plain interval."
+          "scan_interval": "Minutes between polls. At the default of 1440 the poll runs once a day at the poll time below; any other value is used as a plain interval.",
+          "tariff": "Usage prices for the water cost statistics you can pick on the Energy dashboard's water card. Your bill shows which applies: most homes connected to sewerage pay the water and sewage rate. South East Water's prices are built in for each financial year; choose Custom prices to enter your own."
+        },
+        "sections": {
+          "billing_period": {
+            "name": "Billing period",
+            "description": "Enter your last meter read date to get usage and cost for the bill so far, the litres left at the step 1 price and a projected bill. Leave the date blank to turn these sensors off.",
+            "data": {
+              "last_read_date": "Last meter read date",
+              "read_days": "Days between meter reads"
+            },
+            "data_description": {
+              "last_read_date": "The “Meter read date” shown in the portal, or the last day of the “For period” line on your latest bill. The current bill starts the day after it.",
+              "read_days": "Days from one meter read to the next. The portal shows the next read date; quarterly reads are 90 to 92 days apart. The bill counts one day fewer, and the step 1 allowance uses the bill's count."
+            }
+          }
+        }
+      },
+      "custom_prices": {
+        "title": "Custom prices",
+        "description": "Usage prices in dollars per kilolitre (1,000 L), as printed on your bill. Fixed service charges are not included.",
+        "data": {
+          "price_step1": "Step 1 price",
+          "price_step2": "Step 2 price",
+          "step_threshold": "Step 1 allowance per day",
+          "price_recycled": "Recycled water price"
+        },
+        "data_description": {
+          "price_step1": "Price per kilolitre for usage up to the daily allowance, or for all usage if there is no step 2 price.",
+          "price_step2": "Price per kilolitre for usage above the daily allowance. Leave blank to charge everything at the step 1 price.",
+          "step_threshold": "Litres a day charged at the step 1 price. South East Water's is 440 L a day.",
+          "price_recycled": "Price per kilolitre for a recycled-water meter. Leave blank to use South East Water's published price."
         }
       }
     }
@@ -124,6 +156,13 @@
       "options": {
         "email": "Email",
         "sms": "Text message (SMS)"
+      }
+    },
+    "tariff": {
+      "options": {
+        "water_sewage": "South East Water: water and sewage",
+        "water_only": "South East Water: water only",
+        "custom": "Custom prices"
       }
     }
   },
@@ -156,6 +195,24 @@
       },
       "recycled_last_reading_date": {
         "name": "Recycled last reading date"
+      },
+      "billing_period_usage": {
+        "name": "Billing period usage"
+      },
+      "billing_period_cost": {
+        "name": "Billing period usage cost"
+      },
+      "step1_remaining": {
+        "name": "Step 1 litres left"
+      },
+      "step1_daily_allowance": {
+        "name": "Step 1 daily allowance"
+      },
+      "projected_usage": {
+        "name": "Projected billing period usage"
+      },
+      "projected_cost": {
+        "name": "Projected billing period usage cost"
       }
     }
   },
@@ -212,6 +269,10 @@
     "v1_entry": {
       "title": "South East Water entry “{title}” needs to be set up again",
       "description": "This entry was created by an earlier version of the integration and holds no portal session, so it cannot be migrated. Delete it under Settings → Devices & services → South East Water, then add the integration again and sign in with a one-time code. Your existing water statistics are kept."
+    },
+    "prices_out_of_date": {
+      "title": "South East Water prices need updating",
+      "description": "Water cost for {year} is being worked out with the {known} prices built into this version of the integration. Update the integration when a version with {year} prices is released, or enter your prices under the integration's options with Custom prices. Once the prices are updated, run the sew_water.import_from_date action from 1 July to cost the days already imported again."
     }
   }
 }
