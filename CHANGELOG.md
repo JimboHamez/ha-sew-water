@@ -3,7 +3,11 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [2.4.0] — 2026-11-28
+
+Water cost and billing-period sensors, requested in [#9](https://github.com/JimboHamez/ha-sew-water/discussions/9).
+Same code as the 2.4.0b4 beta, confirmed by testers in #9, plus the two small fixes at the end. Usage statistics
+and the existing sensors are unchanged.
 
 ### Added
 - **Water cost for the Energy dashboard** ([#9](https://github.com/JimboHamez/ha-sew-water/discussions/9)). New
@@ -22,6 +26,13 @@ All notable changes to this project are documented here. The format follows
 Step 2 is applied to each day's usage above 440 L rather than over the billing period, so the cost can read a
 little higher than the bill when usage is uneven. Fixed service charges and concessions are not included. After
 updating, the cost history is imported once from the installation date given at setup, or for the last 90 days.
+
+### Changed
+- The device page reads *Digital water meter by JimboHamez* instead of *by South East Water*, which suggested
+  the utility made the integration.
+
+### Fixed
+- The integration's icon no longer shows a white edge on dark themes.
 
 ## [2.3.1] — 2026-11-12
 

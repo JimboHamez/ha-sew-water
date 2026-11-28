@@ -36,7 +36,13 @@ This integration maps the portal's login, one-time code and usage requests to pl
 
 ---
 
-## 🆕 What's new in v2.3.1
+## 🆕 What's new in v2.4.0
+
+- **Water cost in the Energy dashboard** ([#9](https://github.com/JimboHamez/ha-sew-water/discussions/9), thanks [@Tronadorau](https://github.com/Tronadorau) and [@vincentq](https://github.com/vincentq)). New statistics `sew_water:water_cost_mains` (and `sew_water:water_cost_recycled`) cost every hour's usage at South East Water's published prices, or at your own. In the water source dialog choose *Use an entity tracking the total costs* and pick the cost statistic ([how](#water-cost)). Past cost is imported once after updating.
+- **Billing-period sensors.** Set your last meter read date under the new **Billing period** options to see this bill's usage and cost so far, the litres left at the step 1 price, a daily allowance to stay within it, and the projected usage and cost for the whole bill ([details](#entities)).
+- **Usage charges only.** Fixed service charges and concessions aren't included. The cost statistic applies step 2 to each day, so it can read a little higher than the bill when usage is uneven.
+
+From v2.3.1:
 
 - **Choose your property** ([#16](https://github.com/JimboHamez/ha-sew-water/issues/16), thanks [@Oscar2024](https://github.com/Oscar2024)). If your login holds more than one property with a digital meter, such as your home and an investment property, setup now asks which one to read, with a drop-down of the addresses. Earlier versions took the first one the portal listed, which could be a property with no usage, leaving the sensors at *Unknown* / 0.00 L. Re-authentication and Reconfigure keep your choice.
 - **Affected?** Remove the integration, delete `sew_water:water_usage_mains` in *Developer tools → Statistics* (it holds the wrong property's 0 L days), then add it again and pick your property.
@@ -80,7 +86,7 @@ From v2.1.0: the time of the daily poll is an option ([#3](https://github.com/Ji
 
 From v2.0.0: the pure-HTTP rewrite — nothing to install, one-time code at setup then never again, hourly statistics for the Energy dashboard, 30-day re-import on every poll, full-history import from the meter's installation date, Reconfigure flow, diagnostics, repair issues and a rule-by-rule [quality scale](#home-assistant-quality-scale) audit. **Upgrading from 1.x:** remove the old integration and add it again; your statistics are kept.
 
-Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.3.1).
+Full history in the [CHANGELOG](CHANGELOG.md) · [release notes](https://github.com/JimboHamez/ha-sew-water/releases/tag/v2.4.0).
 
 ---
 
@@ -271,7 +277,7 @@ How each hour is costed:
 
 - **Usage charges only.** Fixed quarterly service charges (water, sewerage, Parks, Waterways and Drainage) and concessions are not included.
 - **Prices by financial year.** South East Water's published residential prices are built in for each financial year from 2025-26, and every day uses the prices of its own year. Days before 1 July 2025 use the 2025-26 prices. When a new financial year starts before this integration has its prices, a **Repairs** issue says so and the newest known prices are used until you update (or switch to custom prices).
-- **Step 2 per day.** South East Water charges step 2 on usage above 440 L a day *averaged over the billing period*. The integration doesn't know your billing period, so it applies the 440 L to each day instead. Over a bill this matches exactly when every day is on the same side of 440 L, and otherwise reads a little high, never low: a day of heavy garden watering counts as step 2 even if quiet days elsewhere in the bill would have averaged it out.
+- **Step 2 per day.** South East Water charges step 2 on usage above 440 L a day *averaged over the billing period*. The cost statistic is written hour by hour, before the bill's total is known, so it applies the 440 L to each day instead (the [billing-period sensors](#entities) use the bill's own rule). Over a bill this matches exactly when every day is on the same side of 440 L, and otherwise reads a little high, never low: a day of heavy garden watering counts as step 2 even if quiet days elsewhere in the bill would have averaged it out.
 
 ---
 
